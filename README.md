@@ -19,7 +19,8 @@ $\Gamma : \text{Identifier} \rightarrow \text{Type}$
 
 $\text{InferType} : \text{Expr} \times \text{Env} \rightarrow \text{Type}$
 
-$\text{InferType}(e, \Gamma) = \begin{cases}
+$$
+\text{InferType}(e, \Gamma) = \begin{cases}
     \tau & \text{if}\ e : \text{Literal} \\
     \Gamma(x) & \text{if}\ e = x : \text{Identifier} \\
     \tau_2 & \text{if}\ e = e_1\ e_2 \land \text{InferType}(e_1, \Gamma) = \tau_1 \rightarrow \tau_2 \land \text{InferType}(e_2, \Gamma) = \tau_1 \\
@@ -27,7 +28,8 @@ $\text{InferType}(e, \Gamma) = \begin{cases}
     \forall \alpha. \tau & \text{if}\ e = \Lambda \alpha. e' \land \text{InferType}(e', \Gamma[\alpha \mapsto \text{TypeVar}]) = \tau \\
     \text{SliceType}(\tau) & \text{if}\ e = [\tau] \land \forall e_i \in e, \text{InferType}(e_i, \Gamma) = \tau \\
     \text{MapType}(\tau_1, \tau_2) & \text{if}\ e = \text{map}[\tau_1]\tau_2 \land \forall (k_i, v_i) \in e, \text{InferType}(k_i, \Gamma) = \tau_1 \land \text{InferType}(v_i, \Gamma) = \tau_2
-\end{cases}$
+\end{cases}
+$$
 
 1. **리터럴 (Literal)**:
 
@@ -78,7 +80,8 @@ $\text{InferType}(e, \Gamma) = \begin{cases}
 
 $\text{Unify} : \text{Type} \times \text{Type} \times \text{Env} \rightarrow \text{Env}$
 
-$\text{Unify}(\tau_1, \tau_2, \Gamma) = \begin{cases}
+$$
+\text{Unify}(\tau_1, \tau_2, \Gamma) = \begin{cases}
     \Gamma & \text{if}\ \tau_1 = \tau_2 \\
     \Gamma[\alpha \mapsto \tau_2] & \text{if}\ \tau_1 = \alpha \land \alpha \notin \text{FTV}(\tau_2) \\
     \Gamma[\alpha \mapsto \tau_1] & \text{if}\ \tau_2 = \alpha \land \alpha \notin \text{FTV}(\tau_1) \\
@@ -86,7 +89,8 @@ $\text{Unify}(\tau_1, \tau_2, \Gamma) = \begin{cases}
     \text{Unify}(\tau', \tau'', \Gamma) & \text{if}\ \tau_1 = \text{SliceType}(\tau') \land \tau_2 = \text{SliceType}(\tau'') \\
     \text{Unify}(\tau_1', \tau_2', \text{Unify}(\tau_1'', \tau_2'', \Gamma)) & \text{if}\ \tau_1 = \text{MapType}(\tau_1', \tau_1'') \land \tau_2 = \text{MapType}(\tau_2', \tau_2'') \\
     \text{error} & \text{otherwise}
-\end{cases}$
+\end{cases}
+$$
 
 여기서 `FTV`는 자유 타입 변수(Free Type Variables)의 집합을 나타냅니다.
 
@@ -126,11 +130,13 @@ $\text{checkConstraint} : \text{Type} \times \text{Constraint} \rightarrow \text
 
 제약 조건은 다음과 같이 정의됩니다.
 
-$\text{checkConstraint}(\tau, C) = \begin{cases}
+$$
+\text{checkConstraint}(\tau, C) = \begin{cases}
  \bigwedge_{i \in C.\text{Interfaces}} \text{implements}(\tau, i) & \text{if}\ C.\text{Types} = \emptyset \\
  \bigvee_{t \in C.\text{Types}} \tau = t & \text{if}\ C.\text{Interfaces} = \emptyset \\
  (\bigwedge_{i \in C.\text{Interfaces}} \text{implements}(\tau, i)) \land (\bigvee_{t \in C.\text{Types}} \tau = t) & \text{otherwise}
-\end{cases}$
+\end{cases}
+$$
 
 이 정의는 다음과 같은 세 가지 경우를 다룹니다:
 

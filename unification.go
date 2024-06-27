@@ -55,6 +55,10 @@ func Unify(t1, t2 Type, env TypeEnv) error {
 			}
 		}
 		return Unify(t1.ReturnType, t2.ReturnType, env)
+	case *SliceType:
+		if t2Slice, ok := t2.(*SliceType); ok {
+			return Unify(t1.ElementType, t2Slice.ElementType, env)
+		}
 	}
 	return ErrUnknownType
 }

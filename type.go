@@ -1,8 +1,12 @@
 package generic
 
+import "fmt"
+
 // Type represents any type in the type system.
 // It serves as the base interface for all types in the generic type system.
-type Type interface{}
+type Type interface {
+	String() string
+}
 
 // TypeVariable represents a type variable with a name.
 // In generic programming, type variables are placeholders for types
@@ -11,10 +15,18 @@ type TypeVariable struct {
 	Name string
 }
 
+func (tv *TypeVariable) String() string {
+	return fmt.Sprintf("TypeVar(%s)", tv.Name)
+}
+
 // TypeConstant represents a constant type with a name.
 // These are concrete types like `int`, `string`, or user-defined types.
 type TypeConstant struct {
 	Name string
+}
+
+func (tc *TypeConstant) String() string {
+	return fmt.Sprintf("TypeConst(%s)", tc.Name)
 }
 
 // FunctionType represents a function type with parameter types and return type.
@@ -24,14 +36,30 @@ type FunctionType struct {
 	ReturnType Type
 }
 
+func (ft *FunctionType) String() string {
+	params := make([]string, len(ft.ParamTypes))
+	for i, param := range ft.ParamTypes {
+		params[i] = param.String()
+	}
+	return fmt.Sprintf("Func(%v) -> %s", params, ft.ReturnType.String())
+}
+
 type Interface struct {
 	Name    string
 	Methods map[string]Type
 }
 
+func (it *Interface) String() string {
+	return fmt.Sprintf("Interface(%s)", it.Name)
+}
+
 type InterfaceType struct {
 	Name    string
 	Methods map[string]Type
+}
+
+func (it *InterfaceType) String() string {
+	return fmt.Sprintf("InterfaceType(%s)", it.Name)
 }
 
 type StructType struct {
@@ -40,9 +68,17 @@ type StructType struct {
 	Methods map[string]Type
 }
 
+func (st *StructType) String() string {
+	return fmt.Sprintf("Struct(%s)", st.Name)
+}
+
 // SliceType represents a slice type
 type SliceType struct {
 	ElementType Type
+}
+
+func (st *SliceType) String() string {
+	return fmt.Sprintf("Slice(%s)", st.ElementType.String())
 }
 
 type TypeConstraint struct {
@@ -50,11 +86,23 @@ type TypeConstraint struct {
 	Types      []Type
 }
 
+func (tc *TypeConstraint) String() string {
+	return fmt.Sprintf("Constraint(%v, %v)", tc.Interfaces, tc.Types)
+}
+
 // GenericType represents a generic type with type parameters.
 type GenericType struct {
 	Name        string
 	TypeParams  []Type
 	Constraints map[string]TypeConstraint
+}
+
+func (gt *GenericType) String() string {
+	params := make([]string, len(gt.TypeParams))
+	for i, param := range gt.TypeParams {
+		params[i] = param.String()
+	}
+	return fmt.Sprintf("Generic(%s, %v)", gt.Name, params)
 }
 
 // TypeEnv store and manage type variables and their types.

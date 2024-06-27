@@ -74,9 +74,33 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 		return inferGenericType(expr.X, []ast.Expr{expr.Index}, env)
 	case *ast.IndexListExpr:
 		return inferGenericType(expr.X, expr.Indices, env)
-	default:
-		return nil, ErrUnknownExpr
+	case *ast.CompositeLit:
+		if arrayType, ok := expr.Type.(*ast.ArrayType); ok && arrayType.Len == nil {
+			// infer the element type
+			elementType, err := InferType(arrayType.Elt, env)
+			if err != nil {
+				return nil, err
+			}
+
+			if len(expr.Elts) == 0 {
+				// empty slice literal, use the specified element type
+				return &SliceType{ElementType: elementType}, nil
+			}
+
+			// check the types of the remaining elements and ensure they are consistent
+			for _, elt := range expr.Elts {
+				eltType, err := InferType(elt, env)
+				if err != nil {
+					return nil, err
+				}
+				if err := Unify(elementType, eltType, env); err != nil {
+					return nil, errors.New("inconsistent element types in slice literal")
+				}
+			}
+			return &SliceType{ElementType: elementType}, nil
+		}
 	}
+	return nil, ErrUnknownExpr
 }
 
 // inferGenericType infers the type of a generic expression with its type parameters,
@@ -143,23 +167,4 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 		Name:       genericType.Name,
 		TypeParams: typeParams,
 	}, nil
-}
-
-// exprFromTypes converts a slice of Type to a slice of ast.Expr
-func exprFromTypes(types []Type) []ast.Expr {
-	exprs := make([]ast.Expr, len(types))
-	for i, t := range types {
-		switch tt := t.(type) {
-		case *TypeConstant:
-			exprs[i] = &ast.Ident{Name: tt.Name}
-		case *TypeVariable:
-			exprs[i] = &ast.Ident{Name: tt.Name}
-		case *GenericType:
-			exprs[i] = &ast.IndexListExpr{
-				X:       &ast.Ident{Name: tt.Name},
-				Indices: exprFromTypes(tt.TypeParams),
-			}
-		}
-	}
-	return exprs
 }

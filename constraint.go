@@ -44,7 +44,7 @@ func impl(t Type, iface Interface) bool {
 		// generic type may be different due to the type parameters
 		// but for simplicity, we assume it's the same
 		return true
-	case FunctionType:
+	case *FunctionType:
 		// function type can't implement an interface
 		return false
 	case *InterfaceType:
@@ -110,6 +110,9 @@ func TypesEqual(t1, t2 Type) bool {
 			}
 		}
 		return true
+	case *SliceType:
+		t2, ok := t2.(*SliceType)
+		return ok && TypesEqual(t1.ElementType, t2.ElementType)
 	default:
 		return false
 	}

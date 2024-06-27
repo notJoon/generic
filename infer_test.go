@@ -193,101 +193,42 @@ func TestInferType(t *testing.T) {
 			},
 			wantErr: nil,
 		},
-		// {
-		//     name: "Infer type of slice literal",
-		//     expr: &ast.CompositeLit{
-		//         Type: &ast.ArrayType{
-		//             Elt: &ast.Ident{Name: "int"},
-		//         },
-		//     },
-		//     env: TypeEnv{
-		//         "int": &TypeConstant{Name: "int"},
-		//     },
-		//     wantType: &SliceType{
-		//         ElementType: &TypeConstant{Name: "int"},
-		//     },
-		//     wantErr: nil,
-		// },
-		// {
-		//     name: "Infer type of map literal",
-		//     expr: &ast.CompositeLit{
-		//         Type: &ast.MapType{
-		//             Key:   &ast.Ident{Name: "string"},
-		//             Value: &ast.Ident{Name: "int"},
-		//         },
-		//     },
-		//     env: TypeEnv{
-		//         "string": &TypeConstant{Name: "string"},
-		//         "int":    &TypeConstant{Name: "int"},
-		//     },
-		//     wantType: &MapType{
-		//         KeyType:   &TypeConstant{Name: "string"},
-		//         ValueType: &TypeConstant{Name: "int"},
-		//     },
-		//     wantErr: nil,
-		// },
-		// {
-		//     name: "Infer type of slice indexing",
-		//     expr: &ast.IndexExpr{
-		//         X:     &ast.Ident{Name: "s"},
-		//         Index: &ast.Ident{Name: "i"},
-		//     },
-		//     env: TypeEnv{
-		//         "s": &SliceType{
-		//             ElementType: &TypeConstant{Name: "float64"},
-		//         },
-		//         "i": &TypeConstant{Name: "int"},
-		//     },
-		//     wantType: &TypeConstant{Name: "float64"},
-		//     wantErr:  nil,
-		// },
-		// {
-		//     name: "Infer type of map indexing",
-		//     expr: &ast.IndexExpr{
-		//         X:     &ast.Ident{Name: "m"},
-		//         Index: &ast.Ident{Name: "k"},
-		//     },
-		//     env: TypeEnv{
-		//         "m": &MapType{
-		//             KeyType:   &TypeConstant{Name: "string"},
-		//             ValueType: &TypeConstant{Name: "bool"},
-		//         },
-		//         "k": &TypeConstant{Name: "string"},
-		//     },
-		//     wantType: &TypeConstant{Name: "bool"},
-		//     wantErr:  nil,
-		// },
-		// {
-		//     name: "Infer type of slice with incorrect index type",
-		//     expr: &ast.IndexExpr{
-		//         X:     &ast.Ident{Name: "s"},
-		//         Index: &ast.Ident{Name: "k"},
-		//     },
-		//     env: TypeEnv{
-		//         "s": &SliceType{
-		//             ElementType: &TypeConstant{Name: "int"},
-		//         },
-		//         "k": &TypeConstant{Name: "string"},
-		//     },
-		//     wantType: nil,
-		//     wantErr:  ErrTypeMismatch,
-		// },
-		// {
-		//     name: "Infer type of map with incorrect key type",
-		//     expr: &ast.IndexExpr{
-		//         X:     &ast.Ident{Name: "m"},
-		//         Index: &ast.Ident{Name: "i"},
-		//     },
-		//     env: TypeEnv{
-		//         "m": &MapType{
-		//             KeyType:   &TypeConstant{Name: "string"},
-		//             ValueType: &TypeConstant{Name: "int"},
-		//         },
-		//         "i": &TypeConstant{Name: "int"},
-		//     },
-		//     wantType: nil,
-		//     wantErr:  ErrTypeMismatch,
-		// },
+		{
+			name: "infer type of empty slice literal",
+			expr: &ast.CompositeLit{
+				Type: &ast.ArrayType{Elt: &ast.Ident{Name: "int"}},
+			},
+			env: TypeEnv{
+				"int": &TypeConstant{Name: "int"},
+			},
+			wantType: &SliceType{ElementType: &TypeConstant{Name: "int"}},
+			wantErr:  nil,
+		},
+		{
+            name: "Infer type of slice of generic type",
+            expr: &ast.CompositeLit{
+                Type: &ast.ArrayType{
+                    Elt: &ast.IndexExpr{
+                        X:     &ast.Ident{Name: "Vector"},
+                        Index: &ast.Ident{Name: "int"},
+                    },
+                },
+            },
+            env: TypeEnv{
+                "Vector": &GenericType{
+                    Name:       "Vector",
+                    TypeParams: []Type{&TypeVariable{Name: "T"}},
+                },
+                "int": &TypeConstant{Name: "int"},
+            },
+            wantType: &SliceType{
+                ElementType: &GenericType{
+                    Name:       "Vector",
+                    TypeParams: []Type{&TypeConstant{Name: "int"}},
+                },
+            },
+            wantErr: nil,
+        },
 	}
 
 	for _, tt := range tests {

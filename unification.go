@@ -3,9 +3,9 @@ package generic
 import "errors"
 
 var (
-	ErrTypeMismatch  = errors.New("type mismatch")
-	ErrArityMismatch = errors.New("number of parameters do not match")
-	ErrUnknownType    = errors.New("unknown type")
+	ErrTypeMismatch      = errors.New("type mismatch")
+	ErrArityMismatch     = errors.New("number of parameters do not match")
+	ErrUnknownType       = errors.New("unknown type")
 	ErrCircularReference = errors.New("circular reference detected")
 )
 
@@ -18,16 +18,16 @@ var (
 // ## Process
 //
 // Unify(t1, t2, env) =
-//   1. t1' = resolve(t1, env)
-//   2. t2' = resolve(t2, env)
-//   3. case (t1', t2') of
-//      (TypeVariable v, _) → unifyVar(v, t2', env)
-//      (TypeConstant c1, TypeConstant c2) → if c1.Name = c2.Name then ok else error
-//      (FunctionType f1, FunctionType f2) → 
-//        if length(f1.ParamTypes) ≠ length(f2.ParamTypes) then error
-//        else forall i. Unify(f1.ParamTypes[i], f2.ParamTypes[i], env) ∧ 
-//             Unify(f1.ReturnType, f2.ReturnType, env)
-//      (_, _) → error
+//  1. t1' = resolve(t1, env)
+//  2. t2' = resolve(t2, env)
+//  3. case (t1', t2') of
+//     (TypeVariable v, _) → unifyVar(v, t2', env)
+//     (TypeConstant c1, TypeConstant c2) → if c1.Name = c2.Name then ok else error
+//     (FunctionType f1, FunctionType f2) →
+//     if length(f1.ParamTypes) ≠ length(f2.ParamTypes) then error
+//     else forall i. Unify(f1.ParamTypes[i], f2.ParamTypes[i], env) ∧
+//     Unify(f1.ReturnType, f2.ReturnType, env)
+//     (_, _) → error
 func Unify(t1, t2 Type, env TypeEnv) error {
 	// resolve any type variables to their current bindings
 	t1 = resolve(t1, env)
@@ -66,14 +66,16 @@ func Unify(t1, t2 Type, env TypeEnv) error {
 // ## Process
 //
 // unifyVar(v, t, env) =
-//   1. t' = resolve(t, env)
-//   2. if v = t' then ok
-//   3. else if occurs(v, t', env) then error
-//   4. else env[v.Name] = t'
+//  1. t' = resolve(t, env)
+//  2. if v = t' then ok
+//  3. else if occurs(v, t', env) then error
+//  4. else env[v.Name] = t'
+//
 // λv.λt.λenv. let t' = resolve(t, env) in
-//   if v = t' then ok
-//   else if occurs(v, t', env) then error
-//   else env[v.Name] ← t'
+//
+//	if v = t' then ok
+//	else if occurs(v, t', env) then error
+//	else env[v.Name] ← t'
 func unifyVar(v *TypeVariable, t Type, env TypeEnv) error {
 	t = resolve(t, env)
 	if v == t {
@@ -101,16 +103,18 @@ func unifyVar(v *TypeVariable, t Type, env TypeEnv) error {
 // ## Process
 //
 // occurs(v, t, env) =
-//   1. t' = resolve(t, env)
-//   2. case t' of
-//      TypeVariable v' → v = v'
-//      FunctionType f → exists p in f.ParamTypes. occurs(v, p, env) ∨ occurs(v, f.ReturnType, env)
-//      _ → false
-// λv.λt.λenv. let t' = resolve(t, env) in
-//   case t' of
+//  1. t' = resolve(t, env)
+//  2. case t' of
 //     TypeVariable v' → v = v'
-//     FunctionType f → ∃p ∈ f.ParamTypes. occurs(v, p, env) ∨ occurs(v, f.ReturnType, env)
+//     FunctionType f → exists p in f.ParamTypes. occurs(v, p, env) ∨ occurs(v, f.ReturnType, env)
 //     _ → false
+//
+// λv.λt.λenv. let t' = resolve(t, env) in
+//
+//	case t' of
+//	  TypeVariable v' → v = v'
+//	  FunctionType f → ∃p ∈ f.ParamTypes. occurs(v, p, env) ∨ occurs(v, f.ReturnType, env)
+//	  _ → false
 func occurs(v *TypeVariable, t Type, env TypeEnv) bool {
 	t = resolve(t, env)
 	switch t := t.(type) {
@@ -138,12 +142,14 @@ func occurs(v *TypeVariable, t Type, env TypeEnv) bool {
 //
 // ## Process
 //
-// resolve(t, env) = 
-//   1. if t is TypeVariable and t.Name in env then resolve(env[t.Name], env)
-//   2. else t
+// resolve(t, env) =
+//  1. if t is TypeVariable and t.Name in env then resolve(env[t.Name], env)
+//  2. else t
+//
 // λt.λenv. case t of
-//   TypeVariable v → if v.Name ∈ dom(env) then resolve(env(v.Name), env) else t
-//   _ → t
+//
+//	TypeVariable v → if v.Name ∈ dom(env) then resolve(env(v.Name), env) else t
+//	_ → t
 func resolve(t Type, env TypeEnv) Type {
 	for {
 		if tv, ok := t.(*TypeVariable); ok {

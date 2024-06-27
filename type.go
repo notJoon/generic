@@ -24,6 +24,12 @@ type FunctionType struct {
 	ReturnType Type
 }
 
+// GenericType represents a generic type with type parameters.
+type GenericType struct {
+	Name       string
+	TypeParams []Type
+}
+
 // TypeEnv store and manage type variables and their types.
 // It acts as a symbol table for type inference, mapping type variable names
 // to their inferred or declared types.

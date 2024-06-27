@@ -6,11 +6,12 @@ import (
 )
 
 var (
-	ErrUnknownIdent       = errors.New("unknown identifier")
-	ErrNotAFunction       = errors.New("not a function")
-	ErrUnknownExpr        = errors.New("unknown expression")
-	ErrNotAGenericType    = errors.New("not a generic type")
-	ErrTypeParamsNotMatch = errors.New("type parameters do not match")
+	ErrUnknownIdent           = errors.New("unknown identifier")
+	ErrNotAFunction           = errors.New("not a function")
+	ErrUnknownExpr            = errors.New("unknown expression")
+	ErrNotAGenericType        = errors.New("not a generic type")
+	ErrTypeParamsNotMatch     = errors.New("type parameters do not match")
+	ErrConstraintNotSatisfied = errors.New("type does not satisfy constraint")
 )
 
 // InferType infers the type of an AST expression in the given type environment.
@@ -117,22 +118,19 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 		return nil, ErrNotAGenericType
 	}
 
+	if len(indices) != len(genericType.TypeParams) {
+		return nil, ErrTypeParamsNotMatch
+	}
+
 	var typeParams []Type
-	for _, index := range indices {
+	for i, index := range indices {
 		paramType, err := InferType(index, env)
 		if err != nil {
 			return nil, err
 		}
-		// handle nested generic types
-		if nestedGeneric, ok := paramType.(*GenericType); ok {
-			paramType, err = inferGenericType(
-				&ast.Ident{Name: nestedGeneric.Name},
-				exprFromTypes(nestedGeneric.TypeParams),
-				env,
-			)
-			if err != nil {
-				return nil, err
-			}
+		cst, ok := genericType.Constraints[genericType.TypeParams[i].(*TypeVariable).Name]
+		if ok && !checkConstraint(paramType, cst) {
+			return nil, ErrConstraintNotSatisfied
 		}
 		typeParams = append(typeParams, paramType)
 	}

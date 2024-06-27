@@ -24,10 +24,37 @@ type FunctionType struct {
 	ReturnType Type
 }
 
+type Interface struct {
+	Name    string
+	Methods map[string]Type
+}
+
+type InterfaceType struct {
+	Name    string
+	Methods map[string]Type
+}
+
+type StructType struct {
+	Name    string
+	Fields  map[string]Type
+	Methods map[string]Type
+}
+
+// SliceType represents a slice type
+type SliceType struct {
+	ElementType Type
+}
+
+type TypeConstraint struct {
+	Interfaces []Interface
+	Types      []Type
+}
+
 // GenericType represents a generic type with type parameters.
 type GenericType struct {
-	Name       string
-	TypeParams []Type
+	Name        string
+	TypeParams  []Type
+	Constraints map[string]TypeConstraint
 }
 
 // TypeEnv store and manage type variables and their types.

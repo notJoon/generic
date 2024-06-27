@@ -81,7 +81,20 @@ func TestInferType(t *testing.T) {
 			wantErr:  ErrNotAFunction,
 		},
 		{
-			name: "Infer type of generic type",
+			name: "Infer type of non-generic type as generic",
+			expr: &ast.IndexExpr{
+				X:     &ast.Ident{Name: "int"},
+				Index: &ast.Ident{Name: "float"},
+			},
+			env: TypeEnv{
+				"int":   &TypeConstant{Name: "int"},
+				"float": &TypeConstant{Name: "float"},
+			},
+			wantType: nil,
+			wantErr:  ErrNotAGenericType,
+		},
+		{
+			name: "Infer type of generic type with single parameter",
 			expr: &ast.IndexExpr{
 				X:     &ast.Ident{Name: "Vector"},
 				Index: &ast.Ident{Name: "int"},
@@ -100,17 +113,49 @@ func TestInferType(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name: "Infer type of non-generic type as generic",
-			expr: &ast.IndexExpr{
-				X:     &ast.Ident{Name: "int"},
-				Index: &ast.Ident{Name: "float"},
+			name: "Infer type of generic type with multiple parameters",
+			expr: &ast.IndexListExpr{
+				X: &ast.Ident{Name: "Map"},
+				Indices: []ast.Expr{
+					&ast.Ident{Name: "string"},
+					&ast.Ident{Name: "int"},
+				},
 			},
 			env: TypeEnv{
-				"int":   &TypeConstant{Name: "int"},
-				"float": &TypeConstant{Name: "float"},
+				"Map": &GenericType{
+					Name:       "Map",
+					TypeParams: []Type{&TypeVariable{Name: "K"}, &TypeVariable{Name: "V"}},
+				},
+				"string": &TypeConstant{Name: "string"},
+				"int":    &TypeConstant{Name: "int"},
+			},
+			wantType: &GenericType{
+				Name:       "Map",
+				TypeParams: []Type{&TypeConstant{Name: "string"}, &TypeConstant{Name: "int"}},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Infer type of generic type with mismatched parameter count",
+			expr: &ast.IndexListExpr{
+				X: &ast.Ident{Name: "Pair"},
+				Indices: []ast.Expr{
+					&ast.Ident{Name: "int"},
+					&ast.Ident{Name: "string"},
+					&ast.Ident{Name: "bool"},
+				},
+			},
+			env: TypeEnv{
+				"Pair": &GenericType{
+					Name:       "Pair",
+					TypeParams: []Type{&TypeVariable{Name: "T1"}, &TypeVariable{Name: "T2"}},
+				},
+				"int":    &TypeConstant{Name: "int"},
+				"string": &TypeConstant{Name: "string"},
+				"bool":   &TypeConstant{Name: "bool"},
 			},
 			wantType: nil,
-			wantErr:  ErrNotAGenericType,
+			wantErr:  ErrTypeParamsNotMatch,
 		},
 	}
 

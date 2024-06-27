@@ -78,8 +78,8 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 	}
 }
 
-// inferGenericType infers the type of a generic expression with its type parameters.
-// It handles both single type parameter (IndexExpr) and multiple type parameters (IndexListExpr).
+// inferGenericType infers the type of a generic expression with its type parameters,
+// including nested generic types.
 //
 // ## Process
 //
@@ -89,6 +89,8 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 //  3. typeParams = []
 //  4. for each index in indices:
 //     paramType = InferType(index, env)
+//     if isGenericType(paramType) then
+//     paramType = inferGenericType(paramType.Name, paramType.TypeParameters, env)
 //     append paramType to typeParams
 //  5. if len(typeParams) ≠ len(baseType.TypeParameters) then error
 //  6. return new GenericType with baseType.Name and typeParams
@@ -97,7 +99,12 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 //
 //	let baseType = InferType(x, env) in
 //	if not isGenericType(baseType) then error else
-//	let typeParams = map (λindex. InferType(index, env)) indices in
+//	let typeParams = map (λindex.
+//	  let paramType = InferType(index, env) in
+//	  if isGenericType(paramType) then
+//	    inferGenericType(paramType.Name, paramType.TypeParameters, env)
+//	  else paramType
+//	) indices in
 //	if length(typeParams) ≠ length(baseType.TypeParameters) then error else
 //	GenericType { Name: baseType.Name, TypeParameters: typeParams }
 func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error) {
@@ -116,6 +123,17 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 		if err != nil {
 			return nil, err
 		}
+		// handle nested generic types
+		if nestedGeneric, ok := paramType.(*GenericType); ok {
+			paramType, err = inferGenericType(
+				&ast.Ident{Name: nestedGeneric.Name},
+				exprFromTypes(nestedGeneric.TypeParams),
+				env,
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
 		typeParams = append(typeParams, paramType)
 	}
 
@@ -127,4 +145,23 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 		Name:       genericType.Name,
 		TypeParams: typeParams,
 	}, nil
+}
+
+// exprFromTypes converts a slice of Type to a slice of ast.Expr
+func exprFromTypes(types []Type) []ast.Expr {
+	exprs := make([]ast.Expr, len(types))
+	for i, t := range types {
+		switch tt := t.(type) {
+		case *TypeConstant:
+			exprs[i] = &ast.Ident{Name: tt.Name}
+		case *TypeVariable:
+			exprs[i] = &ast.Ident{Name: tt.Name}
+		case *GenericType:
+			exprs[i] = &ast.IndexListExpr{
+				X:       &ast.Ident{Name: tt.Name},
+				Indices: exprFromTypes(tt.TypeParams),
+			}
+		}
+	}
+	return exprs
 }

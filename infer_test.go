@@ -157,6 +157,42 @@ func TestInferType(t *testing.T) {
 			wantType: nil,
 			wantErr:  ErrTypeParamsNotMatch,
 		},
+		{
+			name: "Infer type of nested generic type",
+			expr: &ast.IndexListExpr{
+				X: &ast.Ident{Name: "Outer"},
+				Indices: []ast.Expr{
+					&ast.Ident{Name: "int"},
+					&ast.IndexExpr{
+						X:     &ast.Ident{Name: "Inner"},
+						Index: &ast.Ident{Name: "string"},
+					},
+				},
+			},
+			env: TypeEnv{
+				"Outer": &GenericType{
+					Name:       "Outer",
+					TypeParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
+				},
+				"Inner": &GenericType{
+					Name:       "Inner",
+					TypeParams: []Type{&TypeVariable{Name: "V"}},
+				},
+				"int":    &TypeConstant{Name: "int"},
+				"string": &TypeConstant{Name: "string"},
+			},
+			wantType: &GenericType{
+				Name: "Outer",
+				TypeParams: []Type{
+					&TypeConstant{Name: "int"},
+					&GenericType{
+						Name:       "Inner",
+						TypeParams: []Type{&TypeConstant{Name: "string"}},
+					},
+				},
+			},
+			wantErr: nil,
+		},
 	}
 
 	for _, tt := range tests {

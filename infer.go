@@ -2,7 +2,9 @@ package generic
 
 import (
 	"errors"
+	"fmt"
 	"go/ast"
+	"go/token"
 )
 
 var (
@@ -75,6 +77,37 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 	case *ast.IndexListExpr:
 		return inferGenericType(expr.X, expr.Indices, env)
 	case *ast.CompositeLit:
+		if mapType, ok := expr.Type.(*ast.MapType); ok {
+			kt, err := InferType(mapType.Key, env)
+			if err != nil {
+				return nil, err
+			}
+			vt, err := InferType(mapType.Value, env)
+			if err != nil {
+				return nil, err
+			}
+
+			// check the element types of the map literal
+			for _, elt := range expr.Elts {
+				if kv, ok := elt.(*ast.KeyValueExpr); ok {
+					k, err := InferType(kv.Key, env)
+					if err != nil {
+						return nil, err
+					}
+					v, err := InferType(kv.Value, env)
+					if err != nil {
+						return nil, err
+					}
+					if err := Unify(kt, k, env); err != nil {
+						return nil, fmt.Errorf("map key type mismatch: %v", err)
+					}
+					if err := Unify(vt, v, env); err != nil {
+						return nil, fmt.Errorf("map value type mismatch: %v", err)
+					}
+				}
+			}
+			return &MapType{KeyType: kt, ValueType: vt}, nil
+		}
 		if arrayType, ok := expr.Type.(*ast.ArrayType); ok && arrayType.Len == nil {
 			// infer the element type
 			elementType, err := InferType(arrayType.Elt, env)
@@ -99,8 +132,107 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 			}
 			return &SliceType{ElementType: elementType}, nil
 		}
+		// struct and generic types
+		if ident, ok := expr.Type.(*ast.Ident); ok {
+			structType, err := resolveTypeByName(ident.Name, env)
+			if err != nil {
+				return nil, err
+			}
+
+			switch st := structType.(type) {
+			case *StructType:
+				// normal struct type
+				for _, elt := range expr.Elts {
+					if kv, ok := elt.(*ast.KeyValueExpr); ok {
+						fieldName := kv.Key.(*ast.Ident).Name
+						fieldType, ok := st.Fields[fieldName]
+						if !ok {
+							return nil, fmt.Errorf("unknown field: %s in struct %s", fieldName, st.Name)
+						}
+						vt, err := InferType(kv.Value, env)
+						if err != nil {
+							return nil, err
+						}
+						if err := Unify(fieldType, vt, env); err != nil {
+							return nil, fmt.Errorf("type mismatch for field %s: %v", fieldName, err)
+						}
+					}
+				}
+				return st, nil
+			case *GenericType:
+				// generic struct type
+				return st, nil
+			}
+		}
+		// handle generic type instantiation
+		if indexExpr, ok := expr.Type.(*ast.IndexExpr); ok {
+			genericType, err := resolveTypeByName(indexExpr.X.(*ast.Ident).Name, env)
+			if err != nil {
+				return nil, err
+			}
+			gt, ok := genericType.(*GenericType)
+			if !ok {
+				return nil, fmt.Errorf("not a generic type: %v", genericType)
+			}
+
+			typeArg, err := InferType(indexExpr.Index, env)
+			if err != nil {
+				return nil, err
+			}
+
+			// check if the type argument satisfies the constraint
+			if constraint, ok := gt.Constraints[gt.TypeParams[0].(*TypeVariable).Name]; ok {
+				if !checkConstraint(typeArg, constraint) {
+					return nil, fmt.Errorf("type argument does not satisfy constraint")
+				}
+			}
+
+			instantiatedType := &GenericType{
+				Name:       gt.Name,
+				TypeParams: []Type{typeArg},
+				Fields: make(map[string]Type),
+			}
+
+			// type check the each struct fields
+			for fname, ftype := range gt.Fields {
+				instantiatedFieldType := substituteTypeVar(ftype, gt.TypeParams[0].(*TypeVariable), typeArg)
+				instantiatedType.Fields[fname] = instantiatedFieldType
+			}
+
+			// check struct literal's field values
+			for _, elt := range expr.Elts {
+				if kv, ok := elt.(*ast.KeyValueExpr); ok {
+					fname := kv.Key.(*ast.Ident).Name
+					fType, ok := instantiatedType.Fields[fname]
+					if !ok {
+						return nil, fmt.Errorf("unknown field %s in generic type %s", fname, gt.Name)
+					}
+					vt, err := InferType(kv.Value, env)
+					if err != nil {
+						return nil, err
+					}
+					if err := Unify(fType, vt, env); err != nil {
+						return nil, fmt.Errorf("type mismatch for field %s: %v", fname, err)
+					}
+				}
+			}
+			return instantiatedType, nil
+		}
+	case *ast.BasicLit:
+		switch expr.Kind {
+		case token.INT:
+			return &TypeConstant{Name: "int"}, nil
+		case token.FLOAT:
+			return &TypeConstant{Name: "float64"}, nil
+		case token.STRING:
+			return &TypeConstant{Name: "string"}, nil
+		case token.CHAR:
+			return &TypeConstant{Name: "rune"}, nil
+		default:
+			return nil, fmt.Errorf("unknown basic literal kind: %v", expr.Kind)
+		}
 	}
-	return nil, ErrUnknownExpr
+	return nil, fmt.Errorf("unknown expression: %T", expr)
 }
 
 // inferGenericType infers the type of a generic expression with its type parameters,
@@ -167,4 +299,23 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 		Name:       genericType.Name,
 		TypeParams: typeParams,
 	}, nil
+}
+
+func substituteTypeVar(t Type, tv *TypeVariable, replacement Type) Type {
+	switch t := t.(type) {
+	case *TypeVariable:
+		if t.Name == tv.Name {
+			return replacement
+		}
+	case *GenericType:
+		newParams := make([]Type, len(t.TypeParams))
+		for i, param := range t.TypeParams {
+			newParams[i] = substituteTypeVar(param, tv, replacement)
+		}
+		return &GenericType{
+			Name:       t.Name,
+			TypeParams: newParams,
+		}
+	}
+	return t
 }

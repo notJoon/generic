@@ -53,6 +53,7 @@ func (it *Interface) String() string {
 	return fmt.Sprintf("Interface(%s)", it.Name)
 }
 
+// InterfaceType represents an interface type with methods.
 type InterfaceType struct {
 	Name    string
 	Methods map[string]Type
@@ -62,6 +63,7 @@ func (it *InterfaceType) String() string {
 	return fmt.Sprintf("InterfaceType(%s)", it.Name)
 }
 
+// StructType represents a struct type with fields and methods.
 type StructType struct {
 	Name    string
 	Fields  map[string]Type
@@ -81,6 +83,16 @@ func (st *SliceType) String() string {
 	return fmt.Sprintf("Slice(%s)", st.ElementType.String())
 }
 
+// MapType represents a map type
+type MapType struct {
+	KeyType  Type
+	ValueType Type
+}
+
+func (mt *MapType) String() string {
+	return fmt.Sprintf("Map[%v]%v", mt.KeyType, mt.ValueType)
+}
+
 type TypeConstraint struct {
 	Interfaces []Interface
 	Types      []Type
@@ -95,6 +107,7 @@ type GenericType struct {
 	Name        string
 	TypeParams  []Type
 	Constraints map[string]TypeConstraint
+	Fields 	map[string]Type
 }
 
 func (gt *GenericType) String() string {

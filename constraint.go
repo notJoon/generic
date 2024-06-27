@@ -113,6 +113,20 @@ func TypesEqual(t1, t2 Type) bool {
 	case *SliceType:
 		t2, ok := t2.(*SliceType)
 		return ok && TypesEqual(t1.ElementType, t2.ElementType)
+	case *InterfaceType:
+		t2, ok := t2.(*InterfaceType)
+		if !ok || t1.Name != t2.Name {
+			return false
+		}
+		for name, method := range t1.Methods {
+			if tm, ok := t2.Methods[name]; !ok || !TypesEqual(tm, method) {
+				return false
+			}
+		}
+		return true
+	case *MapType:
+		t2, ok := t2.(*MapType)
+		return ok && TypesEqual(t1.KeyType, t2.KeyType) && TypesEqual(t1.ValueType, t2.ValueType)
 	default:
 		return false
 	}

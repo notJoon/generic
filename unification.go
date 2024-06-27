@@ -1,6 +1,9 @@
 package generic
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	ErrTypeMismatch      = errors.New("type mismatch")
@@ -32,6 +35,11 @@ func Unify(t1, t2 Type, env TypeEnv) error {
 	// resolve any type variables to their current bindings
 	t1 = resolve(t1, env)
 	t2 = resolve(t2, env)
+
+	if isInterfaceAny(t1) || isInterfaceAny(t2) {
+		return nil
+	}
+
 	switch t1 := t1.(type) {
 	case *TypeVariable:
 		return unifyVar(t1, t2, env)
@@ -59,6 +67,37 @@ func Unify(t1, t2 Type, env TypeEnv) error {
 		if t2Slice, ok := t2.(*SliceType); ok {
 			return Unify(t1.ElementType, t2Slice.ElementType, env)
 		}
+	case *GenericType:
+		t2Generic, ok := t2.(*GenericType)
+		if !ok || t1.Name != t2Generic.Name || len(t1.TypeParams) != len(t2Generic.TypeParams) {
+			return ErrTypeMismatch
+		}
+		for i := range t1.TypeParams {
+			if err := Unify(t1.TypeParams[i], t2Generic.TypeParams[i], env); err != nil {
+				return err
+			}
+		}
+		return nil
+	case  *InterfaceType:
+		t2Interface, ok := t2.(*InterfaceType)
+		if !ok || t1.Name != t2Interface.Name {
+			return ErrTypeMismatch
+		}
+		for name, method := range t1.Methods {
+			if tm, ok := t2Interface.Methods[name]; !ok || !TypesEqual(tm, method) {
+				return ErrTypeMismatch
+			}
+		}
+		return nil
+	case *MapType:
+		t2Map, ok := t2.(*MapType)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		if err := Unify(t1.KeyType, t2Map.KeyType, env); err != nil {
+			return err
+		}
+		return Unify(t1.ValueType, t2Map.ValueType, env)
 	}
 	return ErrUnknownType
 }
@@ -166,4 +205,18 @@ func resolve(t Type, env TypeEnv) Type {
 			return t
 		}
 	}
+}
+
+func resolveTypeByName(name string, env TypeEnv) (Type, error) {
+    if t, ok := env[name]; ok {
+        return t, nil
+    }
+    return nil, fmt.Errorf("unknown type: %s", name)
+}
+
+func isInterfaceAny(t Type) bool {
+	if it, ok := t.(*InterfaceType); ok {
+		return it.Name == "interface{}"
+	}
+	return false
 }

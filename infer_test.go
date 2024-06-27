@@ -2,6 +2,7 @@ package generic
 
 import (
 	"go/ast"
+	"go/token"
 	"testing"
 )
 
@@ -228,6 +229,217 @@ func TestInferType(t *testing.T) {
                 },
             },
             wantErr: nil,
+        },
+		{
+            name: "Infer type of non-empty slice literal",
+            expr: &ast.CompositeLit{
+                Type: &ast.ArrayType{Elt: &ast.Ident{Name: "int"}},
+                Elts: []ast.Expr{
+                    &ast.BasicLit{Kind: token.INT, Value: "1"},
+                    &ast.BasicLit{Kind: token.INT, Value: "2"},
+                    &ast.BasicLit{Kind: token.INT, Value: "3"},
+                },
+            },
+            env: TypeEnv{
+                "int": &TypeConstant{Name: "int"},
+            },
+            wantType: &SliceType{ElementType: &TypeConstant{Name: "int"}},
+            wantErr:  nil,
+        },
+		{
+            name: "Infer type of int literal",
+            expr: &ast.BasicLit{Kind: token.INT, Value: "42"},
+            env:  TypeEnv{},
+            wantType: &TypeConstant{Name: "int"},
+            wantErr:  nil,
+        },
+		{
+            name: "Infer type of float literal",
+            expr: &ast.BasicLit{Kind: token.FLOAT, Value: "3.14"},
+            env:  TypeEnv{},
+            wantType: &TypeConstant{Name: "float64"},
+            wantErr:  nil,
+        },
+		{
+            name: "Infer type of string literal",
+            expr: &ast.BasicLit{Kind: token.STRING, Value: `"hello"`},
+            env:  TypeEnv{},
+            wantType: &TypeConstant{Name: "string"},
+            wantErr:  nil,
+        },
+		{
+            name: "Infer type of rune literal",
+            expr: &ast.BasicLit{Kind: token.CHAR, Value: "'A'"},
+            env:  TypeEnv{},
+            wantType: &TypeConstant{Name: "rune"},
+            wantErr:  nil,
+        },
+		{
+            name: "Infer type of slice with different basic literals",
+            expr: &ast.CompositeLit{
+                Type: &ast.ArrayType{Elt: &ast.Ident{Name: "interface{}"}},
+                Elts: []ast.Expr{
+                    &ast.BasicLit{Kind: token.INT, Value: "1"},
+                    &ast.BasicLit{Kind: token.FLOAT, Value: "2.5"},
+                    &ast.BasicLit{Kind: token.STRING, Value: `"three"`},
+                },
+            },
+            env: TypeEnv{
+                "interface{}": &InterfaceType{Name: "interface{}"},
+            },
+            wantType: &SliceType{ElementType: &InterfaceType{Name: "interface{}"}},
+            wantErr:  nil,
+        },
+		{
+            name: "Infer type of empty map literal",
+            expr: &ast.CompositeLit{
+                Type: &ast.MapType{
+                    Key:   &ast.Ident{Name: "string"},
+                    Value: &ast.Ident{Name: "int"},
+                },
+            },
+            env: TypeEnv{
+                "string": &TypeConstant{Name: "string"},
+                "int":    &TypeConstant{Name: "int"},
+            },
+            wantType: &MapType{
+                KeyType:   &TypeConstant{Name: "string"},
+                ValueType: &TypeConstant{Name: "int"},
+            },
+            wantErr: nil,
+        },
+		{
+            name: "Infer type of non-empty map literal",
+            expr: &ast.CompositeLit{
+                Type: &ast.MapType{
+                    Key:   &ast.Ident{Name: "string"},
+                    Value: &ast.Ident{Name: "int"},
+                },
+                Elts: []ast.Expr{
+                    &ast.KeyValueExpr{
+                        Key:   &ast.BasicLit{Kind: token.STRING, Value: `"one"`},
+                        Value: &ast.BasicLit{Kind: token.INT, Value: "1"},
+                    },
+                    &ast.KeyValueExpr{
+                        Key:   &ast.BasicLit{Kind: token.STRING, Value: `"two"`},
+                        Value: &ast.BasicLit{Kind: token.INT, Value: "2"},
+                    },
+                },
+            },
+            env: TypeEnv{
+                "string": &TypeConstant{Name: "string"},
+                "int":    &TypeConstant{Name: "int"},
+            },
+            wantType: &MapType{
+                KeyType:   &TypeConstant{Name: "string"},
+                ValueType: &TypeConstant{Name: "int"},
+            },
+            wantErr: nil,
+        },
+		{
+            name: "Infer type of generic function call",
+            expr: &ast.CallExpr{
+                Fun: &ast.IndexExpr{
+                    X:     &ast.Ident{Name: "GenericFunc"},
+                    Index: &ast.Ident{Name: "int"},
+                },
+                Args: []ast.Expr{
+                    &ast.BasicLit{Kind: token.INT, Value: "42"},
+                },
+            },
+            env: TypeEnv{
+                "GenericFunc": &GenericType{
+                    Name: "GenericFunc",
+                    TypeParams: []Type{&TypeVariable{Name: "T"}},
+                    Constraints: map[string]TypeConstraint{
+                        "T": {Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "float64"}}},
+                    },
+                },
+                "int": &TypeConstant{Name: "int"},
+            },
+            wantType: &TypeConstant{Name: "int"},
+            wantErr:  nil,
+        },
+		{
+            name: "Infer type of generic struct instantiation",
+            expr: &ast.CompositeLit{
+                Type: &ast.IndexExpr{
+                    X:     &ast.Ident{Name: "GenericPair"},
+                    Index: &ast.Ident{Name: "string"},
+                },
+                Elts: []ast.Expr{
+                    &ast.KeyValueExpr{
+                        Key:   &ast.Ident{Name: "First"},
+                        Value: &ast.BasicLit{Kind: token.STRING, Value: `"hello"`},
+                    },
+                    &ast.KeyValueExpr{
+                        Key:   &ast.Ident{Name: "Second"},
+                        Value: &ast.BasicLit{Kind: token.STRING, Value: `"world"`},
+                    },
+                },
+            },
+            env: TypeEnv{
+                "GenericPair": &GenericType{
+                    Name: "GenericPair",
+                    TypeParams: []Type{&TypeVariable{Name: "T"}},
+                },
+                "string": &TypeConstant{Name: "string"},
+            },
+            wantType: &GenericType{
+                Name: "GenericPair",
+                TypeParams: []Type{&TypeConstant{Name: "string"}},
+            },
+            wantErr: nil,
+        },
+        {
+            name: "Infer type of nested generic types",
+            expr: &ast.IndexExpr{
+                X: &ast.Ident{Name: "Container"},
+                Index: &ast.IndexExpr{
+                    X:     &ast.Ident{Name: "Pair"},
+                    Index: &ast.Ident{Name: "int"},
+                },
+            },
+            env: TypeEnv{
+                "Container": &GenericType{
+                    Name: "Container",
+                    TypeParams: []Type{&TypeVariable{Name: "T"}},
+                },
+                "Pair": &GenericType{
+                    Name: "Pair",
+                    TypeParams: []Type{&TypeVariable{Name: "U"}},
+                },
+                "int": &TypeConstant{Name: "int"},
+            },
+            wantType: &GenericType{
+                Name: "Container",
+                TypeParams: []Type{
+                    &GenericType{
+                        Name:       "Pair",
+                        TypeParams: []Type{&TypeConstant{Name: "int"}},
+                    },
+                },
+            },
+            wantErr: nil,
+        },
+        {
+            name: "Infer type with type constraint violation",
+            expr: &ast.IndexExpr{
+                X:     &ast.Ident{Name: "NumericContainer"},
+                Index: &ast.Ident{Name: "string"},
+            },
+            env: TypeEnv{
+                "NumericContainer": &GenericType{
+                    Name: "NumericContainer",
+                    TypeParams: []Type{&TypeVariable{Name: "T"}},
+                    Constraints: map[string]TypeConstraint{
+                        "T": {Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "float64"}}},
+                    },
+                },
+                "string": &TypeConstant{Name: "string"},
+            },
+            wantType: nil,
+            wantErr:  ErrConstraintNotSatisfied,
         },
 	}
 

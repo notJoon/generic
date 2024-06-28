@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"strconv"
 )
 
 var (
@@ -77,17 +78,16 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 	case *ast.IndexListExpr:
 		return inferGenericType(expr.X, expr.Indices, env)
 	case *ast.CompositeLit:
-		if mapType, ok := expr.Type.(*ast.MapType); ok {
-			kt, err := InferType(mapType.Key, env)
+		switch typeExpr := expr.Type.(type) {
+		case *ast.MapType:
+			kt, err := InferType(typeExpr.Key, env)
 			if err != nil {
 				return nil, err
 			}
-			vt, err := InferType(mapType.Value, env)
+			vt, err := InferType(typeExpr.Value, env)
 			if err != nil {
 				return nil, err
 			}
-
-			// check the element types of the map literal
 			for _, elt := range expr.Elts {
 				if kv, ok := elt.(*ast.KeyValueExpr); ok {
 					k, err := InferType(kv.Key, env)
@@ -107,66 +107,103 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 				}
 			}
 			return &MapType{KeyType: kt, ValueType: vt}, nil
-		}
-		if arrayType, ok := expr.Type.(*ast.ArrayType); ok && arrayType.Len == nil {
-			// infer the element type
-			elementType, err := InferType(arrayType.Elt, env)
-			if err != nil {
-				return nil, err
-			}
-
-			if len(expr.Elts) == 0 {
-				// empty slice literal, use the specified element type
-				return &SliceType{ElementType: elementType}, nil
-			}
-
-			// check the types of the remaining elements and ensure they are consistent
-			for _, elt := range expr.Elts {
-				eltType, err := InferType(elt, env)
+		case *ast.ArrayType:
+			// handle slice literal
+			if typeExpr.Len == nil {
+				et, err := InferType(typeExpr.Elt, env)
 				if err != nil {
 					return nil, err
 				}
-				if err := Unify(elementType, eltType, env); err != nil {
-					return nil, errors.New("inconsistent element types in slice literal")
+				if len(expr.Elts) == 0 {
+					// empty slice literal, use the specified element type
+					return &SliceType{ElementType: et}, nil
 				}
+
+				// check the types of the remaining elements and ensure they are consistent
+				for _, elt := range expr.Elts {
+					eltType, err := InferType(elt, env)
+					if err != nil {
+						return nil, err
+					}
+					if err := Unify(et, eltType, env); err != nil {
+						return nil, errors.New("inconsistent element types in slice literal")
+					}
+				}
+				return &SliceType{ElementType: et}, nil
 			}
-			return &SliceType{ElementType: elementType}, nil
-		}
-		// struct and generic types
-		if ident, ok := expr.Type.(*ast.Ident); ok {
-			structType, err := resolveTypeByName(ident.Name, env)
+			// handle array literal
+			lenExpr, ok := typeExpr.Len.(*ast.BasicLit)
+			if !ok || lenExpr.Kind != token.INT {
+				return nil, errors.New("invalid array length expression")
+			}
+			length, err := strconv.Atoi(lenExpr.Value)
+			if err != nil {
+				return nil, fmt.Errorf("invalid array length: %v", err)
+			}
+			elemType, err := InferType(typeExpr.Elt, env)
 			if err != nil {
 				return nil, err
 			}
-
-			switch st := structType.(type) {
-			case *StructType:
-				// normal struct type
-				for _, elt := range expr.Elts {
-					if kv, ok := elt.(*ast.KeyValueExpr); ok {
-						fieldName := kv.Key.(*ast.Ident).Name
-						fieldType, ok := st.Fields[fieldName]
-						if !ok {
-							return nil, fmt.Errorf("unknown field: %s in struct %s", fieldName, st.Name)
-						}
-						vt, err := InferType(kv.Value, env)
-						if err != nil {
-							return nil, err
-						}
-						if err := Unify(fieldType, vt, env); err != nil {
-							return nil, fmt.Errorf("type mismatch for field %s: %v", fieldName, err)
-						}
-					}
+			// check element types of the array literal
+			for _, elt := range expr.Elts {
+				et, err := InferType(elt, env)
+				if err != nil {
+					return nil, err
 				}
-				return st, nil
-			case *GenericType:
-				// generic struct type
-				return st, nil
+				if !TypesEqual(elemType, et) {
+					return nil, fmt.Errorf("element type mismatch: %v", err)
+				}
 			}
-		}
-		// handle generic type instantiation
-		if indexExpr, ok := expr.Type.(*ast.IndexExpr); ok {
-			genericType, err := resolveTypeByName(indexExpr.X.(*ast.Ident).Name, env)
+			return &ArrayType{ElementType: elemType, Len: length}, nil
+		case *ast.Ident:
+			structType, ok := env[typeExpr.Name].(*StructType)
+			if !ok {
+				return nil, fmt.Errorf("unknown struct type: %s", typeExpr.Name)
+			}
+
+			newStruct := &StructType{
+				Name:   structType.Name,
+				Fields: make(map[string]Type),
+			}
+
+			// handle each field
+			for _, elt := range expr.Elts {
+				kv, ok := elt.(*ast.KeyValueExpr)
+				if !ok {
+					return nil, fmt.Errorf("invalid struct literal")
+				}
+
+				fieldName := kv.Key.(*ast.Ident).Name
+				fieldType, ok := structType.Fields[fieldName]
+				if !ok {
+					return nil, fmt.Errorf("unknown field: %s", fieldName)
+				}
+
+				// nested struct
+				if nestedCompLit, ok := kv.Value.(*ast.CompositeLit); ok {
+					nestedType, err := InferType(nestedCompLit, env)
+					if err != nil {
+						return nil, err
+					}
+					if !TypesEqual(fieldType, nestedType) {
+						return nil, fmt.Errorf("type mismatch for field %s", fieldName)
+					}
+					newStruct.Fields[fieldName] = nestedType
+				} else {
+					fieldValue, err := InferType(kv.Value, env)
+					if err != nil {
+						return nil, err
+					}
+					if !TypesEqual(fieldType, fieldValue) {
+						return nil, fmt.Errorf("type mismatch for field %s", fieldName)
+					}
+					newStruct.Fields[fieldName] = fieldValue
+				}
+			}
+			return newStruct, nil
+		// genetic type instantiation
+		case *ast.IndexExpr:
+			genericType, err := resolveTypeByName(typeExpr.X.(*ast.Ident).Name, env)
 			if err != nil {
 				return nil, err
 			}
@@ -174,8 +211,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 			if !ok {
 				return nil, fmt.Errorf("not a generic type: %v", genericType)
 			}
-
-			typeArg, err := InferType(indexExpr.Index, env)
+			typeArg, err := InferType(typeExpr.Index, env)
 			if err != nil {
 				return nil, err
 			}
@@ -190,7 +226,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 			instantiatedType := &GenericType{
 				Name:       gt.Name,
 				TypeParams: []Type{typeArg},
-				Fields: make(map[string]Type),
+				Fields:     make(map[string]Type),
 			}
 
 			// type check the each struct fields
@@ -231,6 +267,14 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 		default:
 			return nil, fmt.Errorf("unknown basic literal kind: %v", expr.Kind)
 		}
+	case *ast.StarExpr:
+		bt, err := InferType(expr.X, env)
+		if err != nil {
+			return nil, err
+		}
+		return &PointerType{Base: bt}, nil
+	case *ast.FuncLit:
+		return inferFunctionType(expr.Type, env)
 	}
 	return nil, fmt.Errorf("unknown expression: %T", expr)
 }
@@ -286,7 +330,7 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 		}
 		cst, ok := genericType.Constraints[genericType.TypeParams[i].(*TypeVariable).Name]
 		if ok && !checkConstraint(paramType, cst) {
-			return nil, ErrConstraintNotSatisfied
+			return nil, fmt.Errorf("type argument %v does not satisfy constraint %v", paramType, cst)
 		}
 		typeParams = append(typeParams, paramType)
 	}
@@ -318,4 +362,74 @@ func substituteTypeVar(t Type, tv *TypeVariable, replacement Type) Type {
 		}
 	}
 	return t
+}
+
+func CalculateMethodSet(t Type) MethodSet {
+	switch t := t.(type) {
+	case *StructType:
+		return calculateStructMethodSet(t, false)
+	case *InterfaceType:
+		return t.Methods
+	case *PointerType:
+		if st, ok := t.Base.(*StructType); ok {
+			return calculateStructMethodSet(st, true)
+		}
+	default:
+		return MethodSet{}
+	}
+	return MethodSet{}
+}
+
+func calculateStructMethodSet(s *StructType, isPtr bool) MethodSet {
+	ms := make(MethodSet)
+
+	// direct methods of the struct
+	for name, method := range s.Methods {
+		if isPtr || !method.IsPointer {
+			ms[name] = method
+		}
+	}
+
+	// methods from embedded fields
+	for _, fld := range s.Fields {
+		if embeddedType, ok := fld.(*StructType); ok {
+			embeddedMethods := calculateStructMethodSet(embeddedType, false)
+			for name, method := range embeddedMethods {
+				if _, exists := ms[name]; !exists {
+					ms[name] = method
+				}
+			}
+		}
+	}
+	return ms
+}
+
+func inferFunctionType(ft *ast.FuncType, env TypeEnv) (Type, error) {
+	var (
+		paramTypes []Type
+		returnType Type
+	)
+
+	if ft.Params != nil {
+		for _, fld := range ft.Params.List {
+			fldt, err := InferType(fld.Type, env)
+			if err != nil {
+				return nil, err
+			}
+			paramTypes = append(paramTypes, fldt)
+		}
+	}
+	if ft.Results != nil {
+		if len(ft.Results.List) == 1 {
+			var err error
+			returnType, err = InferType(ft.Results.List[0].Type, env)
+			if err != nil {
+				return nil, err
+			}
+		} else if len(ft.Results.List) > 1 {
+			// handle multiple return values. like tuple type or anonymous struct type
+			panic("multiple return values not supported yet")
+		}
+	}
+	return &FunctionType{ParamTypes: paramTypes, ReturnType: returnType}, nil
 }

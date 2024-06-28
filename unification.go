@@ -78,13 +78,13 @@ func Unify(t1, t2 Type, env TypeEnv) error {
 			}
 		}
 		return nil
-	case  *InterfaceType:
+	case *InterfaceType:
 		t2Interface, ok := t2.(*InterfaceType)
 		if !ok || t1.Name != t2Interface.Name {
 			return ErrTypeMismatch
 		}
-		for name, method := range t1.Methods {
-			if tm, ok := t2Interface.Methods[name]; !ok || !TypesEqual(tm, method) {
+		for name := range t1.Methods {
+			if _, ok := t2Interface.Methods[name]; !ok {
 				return ErrTypeMismatch
 			}
 		}
@@ -98,6 +98,12 @@ func Unify(t1, t2 Type, env TypeEnv) error {
 			return err
 		}
 		return Unify(t1.ValueType, t2Map.ValueType, env)
+	case *PointerType:
+		t2Ptr, ok := t2.(*PointerType)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		return Unify(t1.Base, t2Ptr.Base, env)
 	}
 	return ErrUnknownType
 }
@@ -208,10 +214,10 @@ func resolve(t Type, env TypeEnv) Type {
 }
 
 func resolveTypeByName(name string, env TypeEnv) (Type, error) {
-    if t, ok := env[name]; ok {
-        return t, nil
-    }
-    return nil, fmt.Errorf("unknown type: %s", name)
+	if t, ok := env[name]; ok {
+		return t, nil
+	}
+	return nil, fmt.Errorf("unknown type: %s", name)
 }
 
 func isInterfaceAny(t Type) bool {

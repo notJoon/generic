@@ -18,8 +18,19 @@ package generic
 //	(∀i ∈ constraint.Interfaces. implementsInterface(t, i)) ∧
 //	(constraint.Types ≠ ∅ ⇒ ∃type ∈ constraint.Types. TypesEqual(t, type))
 func checkConstraint(t Type, constraint TypeConstraint) bool {
+	if ptr, ok := t.(*PointerType); ok {
+		// if pointer type, check constraints against base type
+		// return checkConstraint(ptr.Base, constraint)
+		for _, allowedType := range constraint.Types {
+			if ptrAllowed, ok := allowedType.(*PointerType); ok {
+				if TypesEqual(ptr.Base, ptrAllowed.Base) {
+					return true
+				}
+			}
+		}
+	}
 	for _, iface := range constraint.Interfaces {
-		if !impl(t, iface) {
+		if !implInterface(t, iface) {
 			return false
 		}
 	}
@@ -34,8 +45,8 @@ func checkConstraint(t Type, constraint TypeConstraint) bool {
 	return true
 }
 
-// impl checks if a type t implements the given interface iface.
-func impl(t Type, iface Interface) bool {
+// implInterface checks if a type t implements the given interface iface.
+func implInterface(t Type, iface Interface) bool {
 	switch concreteType := t.(type) {
 	case *TypeConstant:
 		// must handling for each primitive type for production level.
@@ -59,8 +70,8 @@ func impl(t Type, iface Interface) bool {
 }
 
 func interfaceContainsAll(t *InterfaceType, iface Interface) bool {
-	for name, method := range iface.Methods {
-		if tm, ok := t.Methods[name]; !ok || !TypesEqual(tm, method) {
+	for name := range iface.Methods {
+		if _, ok := t.Methods[name]; !ok {
 			return false
 		}
 	}
@@ -68,8 +79,8 @@ func interfaceContainsAll(t *InterfaceType, iface Interface) bool {
 }
 
 func structImplsInterface(t *StructType, iface Interface) bool {
-	for name, method := range iface.Methods {
-		if tm, ok := t.Methods[name]; !ok || !TypesEqual(tm, method) {
+	for name := range iface.Methods {
+		if _, ok := t.Methods[name]; !ok {
 			return false
 		}
 	}
@@ -113,13 +124,37 @@ func TypesEqual(t1, t2 Type) bool {
 	case *SliceType:
 		t2, ok := t2.(*SliceType)
 		return ok && TypesEqual(t1.ElementType, t2.ElementType)
+	case *ArrayType:
+		t2, ok := t2.(*ArrayType)
+		return ok && t1.Len == t2.Len && TypesEqual(t1.ElementType, t2.ElementType)
 	case *InterfaceType:
 		t2, ok := t2.(*InterfaceType)
 		if !ok || t1.Name != t2.Name {
 			return false
 		}
-		for name, method := range t1.Methods {
-			if tm, ok := t2.Methods[name]; !ok || !TypesEqual(tm, method) {
+		for name := range t1.Methods {
+			if _, ok := t2.Methods[name]; !ok {
+				return false
+			}
+		}
+		return true
+	case *StructType:
+		t2, ok := t2.(*StructType)
+		if !ok || t1.Name != t2.Name {
+			return false
+		}
+		if len(t1.Fields) != len(t2.Fields) || len(t1.Methods) != len(t2.Methods) {
+			return false
+		}
+		for name, fld1 := range t1.Fields {
+			fld2, ok := t2.Fields[name]
+			if !ok || !TypesEqual(fld1, fld2) {
+				return false
+			}
+		}
+		for name, m1 := range t1.Methods {
+			m2, ok := t2.Methods[name]
+			if !ok || !MethodsEqual(m1, m2) {
 				return false
 			}
 		}
@@ -127,7 +162,31 @@ func TypesEqual(t1, t2 Type) bool {
 	case *MapType:
 		t2, ok := t2.(*MapType)
 		return ok && TypesEqual(t1.KeyType, t2.KeyType) && TypesEqual(t1.ValueType, t2.ValueType)
+	case *PointerType:
+		t2, ok := t2.(*PointerType)
+		return ok && TypesEqual(t1.Base, t2.Base)
 	default:
 		return false
 	}
+}
+
+// MethodsEqual compares two Method types for equality.
+func MethodsEqual(m1, m2 Method) bool {
+	if m1.Name != m2.Name || m1.IsPointer != m2.IsPointer {
+		return false
+	}
+	if len(m1.Params) != len(m2.Params) || len(m1.Results) != len(m2.Results) {
+		return false
+	}
+	for i := range m1.Params {
+		if !TypesEqual(m1.Params[i], m2.Params[i]) {
+			return false
+		}
+	}
+	for i := range m1.Results {
+		if !TypesEqual(m1.Results[i], m2.Results[i]) {
+			return false
+		}
+	}
+	return true
 }

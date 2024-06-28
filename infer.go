@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/token"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -219,7 +220,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 			// check if the type argument satisfies the constraint
 			if constraint, ok := gt.Constraints[gt.TypeParams[0].(*TypeVariable).Name]; ok {
 				if !checkConstraint(typeArg, constraint) {
-					return nil, fmt.Errorf("type argument does not satisfy constraint")
+					return nil, fmt.Errorf("type argument %v does not satisfy constraint %v", typeArg, constraint)
 				}
 			}
 
@@ -259,7 +260,10 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 		case token.INT:
 			return &TypeConstant{Name: "int"}, nil
 		case token.FLOAT:
-			return &TypeConstant{Name: "float64"}, nil
+			if strings.Contains(expr.Value, ".") {
+				return &TypeConstant{Name: "float64"}, nil
+			}
+			return &TypeConstant{Name: "float32"}, nil
 		case token.STRING:
 			return &TypeConstant{Name: "string"}, nil
 		case token.CHAR:

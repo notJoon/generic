@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -690,7 +691,7 @@ func TestInferType(t *testing.T) {
 				"string": &TypeConstant{Name: "string"},
 			},
 			wantType: nil,
-			wantErr:  fmt.Errorf("type argument does not satisfy constraint"),
+			wantErr:  fmt.Errorf("type argument TypeConst(string) does not satisfy constraint {[] [TypeConst(int) TypeConst(float32) TypeConst(float64)]}"),
 		},
 		{
 			name: "Infer type of non-generic type as generic",
@@ -703,7 +704,7 @@ func TestInferType(t *testing.T) {
 				"float64": &TypeConstant{Name: "float64"},
 			},
 			wantType: nil,
-			wantErr:  fmt.Errorf("not a generic type: TypeConst(int)"),
+			wantErr:  ErrNotAGenericType,
 		},
 	}
 
@@ -714,8 +715,8 @@ func TestInferType(t *testing.T) {
 				t.Errorf("InferType() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if err != tt.wantErr {
-				t.Errorf("InferType() error = %v, wantErr %v", err, tt.wantErr)
+			if err != nil && err.Error() != tt.wantErr.Error() {
+				t.Errorf("InferType() error diff:\n%s", diffStrings(err.Error(), tt.wantErr.Error()))
 				return
 			}
 			if !TypesEqual(gotType, tt.wantType) {
@@ -980,4 +981,29 @@ func TestCalculateMethodSet(t *testing.T) {
 			}
 		})
 	}
+}
+
+func diffStrings(a, b string) string {
+	var diff strings.Builder
+	aLines := strings.Split(a, "\n")
+	bLines := strings.Split(b, "\n")
+
+	maxLines := len(aLines)
+	if len(bLines) > maxLines {
+		maxLines = len(bLines)
+	}
+
+	for i := 0; i < maxLines; i++ {
+		var aLine, bLine string
+		if i < len(aLines) {
+			aLine = aLines[i]
+		}
+		if i < len(bLines) {
+			bLine = bLines[i]
+		}
+		if aLine != bLine {
+			diff.WriteString(fmt.Sprintf("- %s\n+ %s\n", aLine, bLine))
+		}
+	}
+	return diff.String()
 }

@@ -168,6 +168,9 @@ func TypesEqual(t1, t2 Type) bool {
 	case *PointerType:
 		t2, ok := t2.(*PointerType)
 		return ok && TypesEqual(t1.Base, t2.Base)
+	case *TypeAlias:
+		t2, ok := t2.(*TypeAlias)
+		return ok && t1.Name == t2.Name && TypesEqual(t1.AliasedTo, t2.AliasedTo)
 	default:
 		return false
 	}

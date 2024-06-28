@@ -49,6 +49,9 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 	switch expr := expr.(type) {
 	case *ast.Ident:
 		if typ, ok := env[expr.Name]; ok {
+			if alias, ok := typ.(*TypeAlias); ok {
+				return alias.AliasedTo, nil
+			}
 			return typ, nil
 		}
 		return nil, ErrUnknownIdent
@@ -494,4 +497,74 @@ func inferParams(fieldList *ast.FieldList, env TypeEnv) ([]Type, error) {
 		}
 	}
 	return params, nil
+}
+
+func inferTypeSpec(spec *ast.TypeSpec, env TypeEnv) (Type, error) {
+	// type alias
+	if spec.Assign.IsValid() {
+		aliased, err := InferType(spec.Type, env)
+		if err != nil {
+			return nil, err
+		}
+		alias := &TypeAlias{
+			Name:   spec.Name.Name,
+			AliasedTo: aliased,
+		}
+		env[spec.Name.Name] = alias // add the alias to the environment
+		return alias, nil
+	}
+
+	// normal type declaration
+	definedType, err := InferType(spec.Type, env)
+	if err != nil {
+		return nil, err
+	}
+
+	// create a new type with the name and add it to the environment
+	switch t := definedType.(type) {
+	case *StructType:
+		newType := &StructType{
+			Name:   spec.Name.Name,
+			Fields: t.Fields,
+			Methods: t.Methods,
+		}
+		env[spec.Name.Name] = newType
+		return newType, nil
+	case *InterfaceType:
+		newType := &InterfaceType{
+			Name:    spec.Name.Name,
+			Methods: t.Methods,
+			Embedded: t.Embedded,
+		}
+		env[spec.Name.Name] = newType
+		return newType, nil
+	default:
+		env[spec.Name.Name] = definedType
+		return definedType, nil
+	}
+}
+
+func InferPackageTypes(file *ast.File, env TypeEnv) (TypeEnv, error) {
+    for _, decl := range file.Decls {
+        genDecl, ok := decl.(*ast.GenDecl)
+        if !ok || genDecl.Tok != token.TYPE {
+            continue
+        }
+        
+        for _, spec := range genDecl.Specs {
+            typeSpec, ok := spec.(*ast.TypeSpec)
+            if !ok {
+                continue
+            }
+            
+            inferredType, err := inferTypeSpec(typeSpec, env)
+            if err != nil {
+                return nil, err
+            }
+            
+            env[typeSpec.Name.Name] = inferredType
+        }
+    }
+    
+    return env, nil
 }

@@ -155,3 +155,13 @@ func (gt *GenericType) String() string {
 // It acts as a symbol table for type inference, mapping type variable names
 // to their inferred or declared types.
 type TypeEnv map[string]Type
+
+// TypeAlias provides a new name for an existing type.
+type TypeAlias struct {
+	Name string
+	AliasedTo Type
+}
+
+func (ta *TypeAlias) String() string {
+	return fmt.Sprintf("TypeAlias(%s = %s)", ta.Name, ta.AliasedTo.String())
+}

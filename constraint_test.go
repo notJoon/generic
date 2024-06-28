@@ -9,20 +9,24 @@ var (
 	// testing purpose
 	Printable = Interface{
 		Name: "Printable",
-		Methods: map[string]Type{
-			"String": &FunctionType{
-				ParamTypes: []Type{},
-				ReturnType: &TypeConstant{Name: "string"},
+		Methods: MethodSet{
+			"String": Method{
+				Name:      "String",
+				Params:    []Type{},
+				Results:   []Type{&TypeConstant{Name: "string"}},
+				IsPointer: false,
 			},
 		},
 	}
 
 	Comparable = Interface{
 		Name: "Comparable",
-		Methods: map[string]Type{
-			"Compare": &FunctionType{
-				ParamTypes: []Type{&TypeVariable{Name: "T"}},
-				ReturnType: &TypeConstant{Name: "int"},
+		Methods: MethodSet{
+			"Compare": Method{
+				Name:      "Compare",
+				Params:    []Type{&TypeVariable{Name: "T"}},
+				Results:   []Type{&TypeConstant{Name: "int"}},
+				IsPointer: false,
 			},
 		},
 	}

@@ -46,7 +46,7 @@ func (ft *FunctionType) String() string {
 
 type Interface struct {
 	Name    string
-	Methods map[string]Type
+	Methods MethodSet
 }
 
 func (it *Interface) String() string {
@@ -56,18 +56,37 @@ func (it *Interface) String() string {
 // InterfaceType represents an interface type with methods.
 type InterfaceType struct {
 	Name    string
-	Methods map[string]Type
+	Methods MethodSet
 }
 
 func (it *InterfaceType) String() string {
 	return fmt.Sprintf("InterfaceType(%s)", it.Name)
 }
 
+type Method struct {
+	Name      string
+	Params    []Type
+	Results   []Type
+	IsPointer bool
+}
+
+type MethodSet map[string]Method
+
+type PointerType struct {
+	Base Type
+}
+
+func (pt *PointerType) String() string {
+	return fmt.Sprintf("*%s", pt.Base.String())
+}
+
+var _ Type = (*PointerType)(nil)
+
 // StructType represents a struct type with fields and methods.
 type StructType struct {
 	Name    string
 	Fields  map[string]Type
-	Methods map[string]Type
+	Methods MethodSet
 }
 
 func (st *StructType) String() string {
@@ -83,9 +102,18 @@ func (st *SliceType) String() string {
 	return fmt.Sprintf("Slice(%s)", st.ElementType.String())
 }
 
+type ArrayType struct {
+	ElementType Type
+	Len         int
+}
+
+func (at *ArrayType) String() string {
+	return fmt.Sprintf("[%d]%s", at.Len, at.ElementType.String())
+}
+
 // MapType represents a map type
 type MapType struct {
-	KeyType  Type
+	KeyType   Type
 	ValueType Type
 }
 
@@ -107,7 +135,7 @@ type GenericType struct {
 	Name        string
 	TypeParams  []Type
 	Constraints map[string]TypeConstraint
-	Fields 	map[string]Type
+	Fields      map[string]Type
 }
 
 func (gt *GenericType) String() string {

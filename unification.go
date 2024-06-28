@@ -79,13 +79,26 @@ func Unify(t1, t2 Type, env TypeEnv) error {
 		}
 		return nil
 	case *InterfaceType:
+		if t1.IsEmpty || t2.(*InterfaceType).IsEmpty {
+			return nil
+		}
 		t2Interface, ok := t2.(*InterfaceType)
 		if !ok || t1.Name != t2Interface.Name {
 			return ErrTypeMismatch
 		}
-		for name := range t1.Methods {
-			if _, ok := t2Interface.Methods[name]; !ok {
+		for name, method1 := range t1.Methods {
+			method2, ok := t2Interface.Methods[name]
+			if !ok {
 				return ErrTypeMismatch
+			}
+			// unify method signatures
+			if err := unifyMethod(method1, method2, env); err != nil {
+				return err
+			}
+		}
+		for _, embedded := range t1.Embedded {
+			if err := Unify(embedded, t2, env); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -106,6 +119,25 @@ func Unify(t1, t2 Type, env TypeEnv) error {
 		return Unify(t1.Base, t2Ptr.Base, env)
 	}
 	return ErrUnknownType
+}
+
+// unifyMethod unifies two method signatures, ensuring that they have the same name,
+// pointer type, and matching parameter and result types.
+func unifyMethod(m1, m2 Method, env TypeEnv) error {
+	if m1.Name != m2.Name || m1.IsPointer != m2.IsPointer {
+		return ErrTypeMismatch
+	}
+	if len(m1.Params) != len(m2.Params) || len(m1.Results) != len(m2.Results) {
+		return ErrArityMismatch
+	}
+
+	for i := range m1.Params {
+		if err := Unify(m1.Params[i], m2.Params[i], env); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // unifyVar unifies a type variable with another type, updating the type environment env.

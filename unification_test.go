@@ -118,3 +118,88 @@ func TestNestedCircularReference(t *testing.T) {
 		t.Fatalf("Expected ErrCircularReference in second unification, got %v", err)
 	}
 }
+
+func TestUnifyInterface(t *testing.T) {
+	tests := []struct {
+		name    string
+		t1      Type
+		t2      Type
+		wantErr error
+	}{
+		{
+			name: "Unify identical interfaces",
+			t1: &InterfaceType{
+				Methods: MethodSet{
+					"Method1": Method{Name: "Method1", Params: []Type{}, Results: []Type{}},
+				},
+			},
+			t2: &InterfaceType{
+				Methods: MethodSet{
+					"Method1": Method{Name: "Method1", Params: []Type{}, Results: []Type{}},
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Unify interfaces with different method names",
+			t1: &InterfaceType{
+				Methods: MethodSet{
+					"Method1": Method{Name: "Method1", Params: []Type{}, Results: []Type{}},
+				},
+			},
+			t2: &InterfaceType{
+				Methods: MethodSet{
+					"Method2": Method{Name: "Method2", Params: []Type{}, Results: []Type{}},
+				},
+			},
+			wantErr: ErrTypeMismatch,
+		},
+		{
+			name: "Unify interface with empty interface",
+			t1: &InterfaceType{
+				Methods: MethodSet{
+					"Method1": Method{Name: "Method1", Params: []Type{}, Results: []Type{}},
+				},
+			},
+			t2: &InterfaceType{
+				IsEmpty: true,
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Unify interfaces with embedded interfaces",
+			t1: &InterfaceType{
+				Methods: MethodSet{
+					"Method1": Method{Name: "Method1", Params: []Type{}, Results: []Type{}},
+				},
+				Embedded: []Type{
+					&InterfaceType{
+						Methods: MethodSet{
+							"EmbeddedMethod": Method{Name: "EmbeddedMethod", Params: []Type{}, Results: []Type{}},
+						},
+					},
+				},
+			},
+			t2: &InterfaceType{
+				Methods: MethodSet{
+					"Method1":        Method{Name: "Method1", Params: []Type{}, Results: []Type{}},
+					"EmbeddedMethod": Method{Name: "EmbeddedMethod", Params: []Type{}, Results: []Type{}},
+				},
+			},
+			wantErr: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := TypeEnv{}
+			err := Unify(tt.t1, tt.t2, env)
+			if (err != nil) != (tt.wantErr != nil) {
+				t.Errorf("Unify() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && tt.wantErr != nil && err.Error() != tt.wantErr.Error() {
+				t.Errorf("Unify() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

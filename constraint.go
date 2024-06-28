@@ -129,8 +129,11 @@ func TypesEqual(t1, t2 Type) bool {
 		return ok && t1.Len == t2.Len && TypesEqual(t1.ElementType, t2.ElementType)
 	case *InterfaceType:
 		t2, ok := t2.(*InterfaceType)
-		if !ok || t1.Name != t2.Name {
+		if !ok {
 			return false
+		}
+		if t1.IsEmpty && t2.IsEmpty {
+			return true
 		}
 		for name := range t1.Methods {
 			if _, ok := t2.Methods[name]; !ok {

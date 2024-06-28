@@ -706,6 +706,106 @@ func TestInferType(t *testing.T) {
 			wantType: nil,
 			wantErr:  ErrNotAGenericType,
 		},
+		{
+			name: "Infer empty interface",
+			expr: &ast.InterfaceType{Methods: &ast.FieldList{}},
+			env:  TypeEnv{},
+			wantType: &InterfaceType{
+				Name:    "interface{}",
+				Methods: MethodSet{},
+				IsEmpty: true,
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Infer interface with methods",
+			expr: &ast.InterfaceType{
+				Methods: &ast.FieldList{
+					List: []*ast.Field{
+						{
+							Names: []*ast.Ident{{Name: "Method1"}},
+							Type: &ast.FuncType{
+								Params:  &ast.FieldList{},
+								Results: &ast.FieldList{},
+							},
+						},
+					},
+				},
+			},
+			env: TypeEnv{},
+			wantType: &InterfaceType{
+				Name: "",
+				Methods: MethodSet{
+					"Method1": Method{
+						Name:      "Method1",
+						Params:    []Type{},
+						Results:   []Type{},
+						IsPointer: false,
+					},
+				},
+				IsEmpty: false,
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Infer interface with embedded interface",
+			expr: &ast.InterfaceType{
+				Methods: &ast.FieldList{
+					List: []*ast.Field{
+						{
+							Names: nil, // Embedded interface
+							Type:  &ast.Ident{Name: "EmbeddedInterface"},
+						},
+						{
+							Names: []*ast.Ident{{Name: "Method1"}},
+							Type: &ast.FuncType{
+								Params:  &ast.FieldList{},
+								Results: &ast.FieldList{},
+							},
+						},
+					},
+				},
+			},
+			env: TypeEnv{
+				"EmbeddedInterface": &InterfaceType{
+					Name: "EmbeddedInterface",
+					Methods: MethodSet{
+						"EmbeddedMethod": Method{
+							Name:      "EmbeddedMethod",
+							Params:    []Type{},
+							Results:   []Type{},
+							IsPointer: false,
+						},
+					},
+				},
+			},
+			wantType: &InterfaceType{
+				Name: "",
+				Methods: MethodSet{
+					"Method1": Method{
+						Name:      "Method1",
+						Params:    []Type{},
+						Results:   []Type{},
+						IsPointer: false,
+					},
+				},
+				Embedded: []Type{
+					&InterfaceType{
+						Name: "EmbeddedInterface",
+						Methods: MethodSet{
+							"EmbeddedMethod": Method{
+								Name:      "EmbeddedMethod",
+								Params:    []Type{},
+								Results:   []Type{},
+								IsPointer: false,
+							},
+						},
+					},
+				},
+				IsEmpty: false,
+			},
+			wantErr: nil,
+		},
 	}
 
 	for _, tt := range tests {

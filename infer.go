@@ -279,6 +279,41 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 		return &PointerType{Base: bt}, nil
 	case *ast.FuncLit:
 		return inferFunctionType(expr.Type, env)
+	case *ast.InterfaceType:
+		iface := &InterfaceType{Name: "", Methods: MethodSet{}, Embedded: []Type{}}
+		for _, field := range expr.Methods.List {
+			if len(field.Names) == 0 {
+				embeddedType, err := InferType(field.Type, env)
+				if err != nil {
+					return nil, err
+				}
+				iface.Embedded = append(iface.Embedded, embeddedType)
+			} else {
+				for _, name := range field.Names {
+					mt, ok := field.Type.(*ast.FuncType)
+					if !ok {
+						return nil, fmt.Errorf("expected function type for method %s", name.Name)
+					}
+
+					params, err := inferParams(mt.Params, env)
+					if err != nil {
+						return nil, fmt.Errorf("error inferring parameters for method %s: %v", name.Name, err)
+					}
+
+					results, err := inferParams(mt.Results, env)
+					if err != nil {
+						return nil, fmt.Errorf("error inferring results for method %s: %v", name.Name, err)
+					}
+
+					iface.Methods[name.Name] = Method{
+						Name:    name.Name,
+						Params:  params,
+						Results: results,
+					}
+				}
+			}
+		}
+		return iface, nil
 	}
 	return nil, fmt.Errorf("unknown expression: %T", expr)
 }
@@ -436,4 +471,27 @@ func inferFunctionType(ft *ast.FuncType, env TypeEnv) (Type, error) {
 		}
 	}
 	return &FunctionType{ParamTypes: paramTypes, ReturnType: returnType}, nil
+}
+
+func inferParams(fieldList *ast.FieldList, env TypeEnv) ([]Type, error) {
+	if fieldList == nil {
+		return nil, nil
+	}
+
+	var params []Type
+	for _, field := range fieldList.List {
+		fieldType, err := InferType(field.Type, env)
+		if err != nil {
+			return nil, err
+		}
+		// multiple names in a field. like (a, b int)
+		if len(field.Names) == 0 {
+			params = append(params, fieldType)
+		} else {
+			for range field.Names {
+				params = append(params, fieldType)
+			}
+		}
+	}
+	return params, nil
 }

@@ -55,11 +55,16 @@ func (it *Interface) String() string {
 
 // InterfaceType represents an interface type with methods.
 type InterfaceType struct {
-	Name    string
-	Methods MethodSet
+	Name     string
+	Methods  MethodSet
+	Embedded []Type
+	IsEmpty  bool // true for interface{}
 }
 
 func (it *InterfaceType) String() string {
+	if it.IsEmpty {
+		return "interface{}"
+	}
 	return fmt.Sprintf("InterfaceType(%s)", it.Name)
 }
 

@@ -159,7 +159,7 @@ func TestInferType(t *testing.T) {
 				"bool":   &TypeConstant{Name: "bool"},
 			},
 			wantType: nil,
-			wantErr:  ErrTypeParamsNotMatch,
+			wantErr:  fmt.Errorf("expected 2 type parameters, got 3"),
 		},
 		{
 			name: "Infer type of nested generic type",
@@ -691,7 +691,7 @@ func TestInferType(t *testing.T) {
 				"string": &TypeConstant{Name: "string"},
 			},
 			wantType: nil,
-			wantErr:  fmt.Errorf("type argument TypeConst(string) does not satisfy constraint {[] [TypeConst(int) TypeConst(float32) TypeConst(float64)]}"),
+			wantErr:  fmt.Errorf("type argument TypeConst(string) does not satisfy constraint for T"),
 		},
 		{
 			name: "Infer type of non-generic type as generic",
@@ -821,6 +821,709 @@ func TestInferType(t *testing.T) {
 			}
 			if !TypesEqual(gotType, tt.wantType) {
 				t.Errorf("InferType() = %v, want %v", gotType, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferTypeWithMultipleTypeParams(t *testing.T) {
+	env := TypeEnv{
+		"Pair": &GenericType{
+			Name: "Pair",
+			TypeParams: []Type{
+				&TypeVariable{Name: "T"},
+				&TypeVariable{Name: "U"},
+			},
+			Fields: map[string]Type{
+				"First":  &TypeVariable{Name: "T"},
+				"Second": &TypeVariable{Name: "U"},
+			},
+		},
+		"int":    &TypeConstant{Name: "int"},
+		"string": &TypeConstant{Name: "string"},
+	}
+
+	expr := &ast.IndexListExpr{
+		X: &ast.Ident{Name: "Pair"},
+		Indices: []ast.Expr{
+			&ast.Ident{Name: "int"},
+			&ast.Ident{Name: "string"},
+		},
+	}
+
+	result, err := InferType(expr, env)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	expected := &GenericType{
+		Name: "Pair",
+		TypeParams: []Type{
+			&TypeConstant{Name: "int"},
+			&TypeConstant{Name: "string"},
+		},
+		Fields: map[string]Type{
+			"First":  &TypeConstant{Name: "int"},
+			"Second": &TypeConstant{Name: "string"},
+		},
+	}
+
+	if !TypesEqual(result, expected) {
+		t.Errorf("Expected %v, but got %v", expected, result)
+	}
+}
+
+func TestInferTypeWithNestedGenericTypes(t *testing.T) {
+	env := TypeEnv{
+		// Map<K, V>
+		"Map": &GenericType{
+			Name: "Map",
+			TypeParams: []Type{
+				&TypeVariable{Name: "K"},
+				&TypeVariable{Name: "V"},
+			},
+			Fields: map[string]Type{
+				"data": &MapType{
+					KeyType:   &TypeVariable{Name: "K"},
+					ValueType: &TypeVariable{Name: "V"},
+				},
+			},
+		},
+		// List<T>
+		"List": &GenericType{
+			Name: "List",
+			TypeParams: []Type{
+				&TypeVariable{Name: "T"},
+			},
+			Fields: map[string]Type{
+				"data": &SliceType{ElementType: &TypeVariable{Name: "T"}},
+			},
+		},
+		"string": &TypeConstant{Name: "string"},
+		"int":    &TypeConstant{Name: "int"},
+	}
+
+	// Map<string, List<int>>
+	expr := &ast.IndexListExpr{
+		X: &ast.Ident{Name: "Map"},
+		Indices: []ast.Expr{
+			&ast.Ident{Name: "string"},
+			&ast.IndexExpr{
+				X:     &ast.Ident{Name: "List"},
+				Index: &ast.Ident{Name: "int"},
+			},
+		},
+	}
+
+	result, err := InferType(expr, env)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Map<string, List<int>>
+	expected := &GenericType{
+		Name: "Map",
+		TypeParams: []Type{
+			&TypeConstant{Name: "string"},
+			&GenericType{
+				Name:       "List",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
+				},
+			},
+		},
+		Fields: map[string]Type{
+			"data": &MapType{
+				KeyType: &TypeConstant{Name: "string"},
+				ValueType: &GenericType{
+					Name:       "List",
+					TypeParams: []Type{&TypeConstant{Name: "int"}},
+					Fields: map[string]Type{
+						"data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
+					},
+				},
+			},
+		},
+	}
+
+	if !TypesEqual(result, expected) {
+		t.Errorf("Expected %v, but got %v", expected, result)
+	}
+}
+
+func TestSubstituteTypeParams(t *testing.T) {
+	visitor := NewTypeVisitor()
+	tests := []struct {
+		name       string
+		t          Type
+		fromParams []Type
+		toParams   []Type
+		expected   Type
+	}{
+		{
+			name:       "Substitute TypeVariable",
+			t:          &TypeVariable{Name: "T"},
+			fromParams: []Type{&TypeVariable{Name: "T"}},
+			toParams:   []Type{&TypeConstant{Name: "int"}},
+			expected:   &TypeConstant{Name: "int"},
+		},
+		{
+			name: "Substitute in GenericType",
+			t: &GenericType{
+				Name:       "List",
+				TypeParams: []Type{&TypeVariable{Name: "T"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeVariable{Name: "T"}},
+				},
+			},
+			fromParams: []Type{&TypeVariable{Name: "T"}},
+			toParams:   []Type{&TypeConstant{Name: "string"}},
+			expected: &GenericType{
+				Name:       "List",
+				TypeParams: []Type{&TypeConstant{Name: "string"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeConstant{Name: "string"}},
+				},
+			},
+		},
+		{
+			name:       "Substitute in SliceType",
+			t:          &SliceType{ElementType: &TypeVariable{Name: "T"}},
+			fromParams: []Type{&TypeVariable{Name: "T"}},
+			toParams:   []Type{&TypeConstant{Name: "int"}},
+			expected:   &SliceType{ElementType: &TypeConstant{Name: "int"}},
+		},
+		{
+			name: "Substitute in MapType",
+			t: &MapType{
+				KeyType:   &TypeVariable{Name: "K"},
+				ValueType: &TypeVariable{Name: "V"},
+			},
+			fromParams: []Type{&TypeVariable{Name: "K"}, &TypeVariable{Name: "V"}},
+			toParams:   []Type{&TypeConstant{Name: "string"}, &TypeConstant{Name: "int"}},
+			expected: &MapType{
+				KeyType:   &TypeConstant{Name: "string"},
+				ValueType: &TypeConstant{Name: "int"},
+			},
+		},
+		{
+			name: "Substitute in FunctionType",
+			t: &FunctionType{
+				ParamTypes: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
+				ReturnType: &TypeVariable{Name: "R"},
+			},
+			fromParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}, &TypeVariable{Name: "R"}},
+			toParams:   []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}, &TypeConstant{Name: "bool"}},
+			expected: &FunctionType{
+				ParamTypes: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}},
+				ReturnType: &TypeConstant{Name: "bool"},
+			},
+		},
+		{
+			name: "Substitute in nested GenericType",
+			t: &GenericType{
+				Name:       "Outer",
+				TypeParams: []Type{&TypeVariable{Name: "T"}},
+				Fields: map[string]Type{
+					"inner": &GenericType{
+						Name:       "Inner",
+						TypeParams: []Type{&TypeVariable{Name: "U"}},
+						Fields: map[string]Type{
+							"data": &TypeVariable{Name: "T"},
+						},
+					},
+				},
+			},
+			fromParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
+			toParams:   []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}},
+			expected: &GenericType{
+				Name:       "Outer",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+				Fields: map[string]Type{
+					"inner": &GenericType{
+						Name:       "Inner",
+						TypeParams: []Type{&TypeConstant{Name: "string"}},
+						Fields: map[string]Type{
+							"data": &TypeConstant{Name: "int"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := substituteTypeParams(tt.t, tt.fromParams, tt.toParams, visitor)
+			if !TypesEqual(result, tt.expected) {
+				t.Errorf("substituteTypeParams() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestInferTypeWithImprovedConstraints(t *testing.T) {
+	env := TypeEnv{
+		// Numeric<T> where T: int | float64
+		"Numeric": &GenericType{
+			Name:       "Numeric",
+			TypeParams: []Type{&TypeVariable{Name: "T"}},
+			Constraints: map[string]TypeConstraint{
+				"T": {
+					Types: []Type{
+						&TypeConstant{Name: "int"},
+						&TypeConstant{Name: "float64"},
+					},
+					Union: true,
+				},
+			},
+		},
+		// Printable interface
+		"Printable": &Interface{
+			Name: "Printable",
+			Methods: MethodSet{
+				"String": Method{Name: "String", Params: []Type{}, Results: []Type{&TypeConstant{Name: "string"}}},
+			},
+		},
+		// Complex<T> where T: Printable & (int | float64)
+		"Complex": &GenericType{
+			Name:       "Complex",
+			TypeParams: []Type{&TypeVariable{Name: "T"}},
+			Constraints: map[string]TypeConstraint{
+				"T": {
+					Interfaces: []Interface{{Name: "Printable"}},
+					Types: []Type{
+						&TypeConstant{Name: "int"},
+						&TypeConstant{Name: "float64"},
+					},
+				},
+			},
+		},
+		"int":     &TypeConstant{Name: "int"},
+		"float64": &TypeConstant{Name: "float64"},
+		"string":  &TypeConstant{Name: "string"},
+	}
+
+	tests := []struct {
+		name     string
+		expr     ast.Expr
+		wantType Type
+		wantErr  bool
+	}{
+		{
+			name: "Numeric with int",
+			// Numeric<int>
+			expr: &ast.IndexExpr{
+				X:     &ast.Ident{Name: "Numeric"},
+				Index: &ast.Ident{Name: "int"},
+			},
+			// Numeric<int>
+			wantType: &GenericType{
+				Name:       "Numeric",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Numeric with float64",
+			// Numeric<float64>
+			expr: &ast.IndexExpr{
+				X:     &ast.Ident{Name: "Numeric"},
+				Index: &ast.Ident{Name: "float64"},
+			},
+			// Numeric<float64>
+			wantType: &GenericType{
+				Name:       "Numeric",
+				TypeParams: []Type{&TypeConstant{Name: "float64"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Numeric with string (should fail)",
+			expr: &ast.IndexExpr{
+				X:     &ast.Ident{Name: "Numeric"},
+				Index: &ast.Ident{Name: "string"},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+		{
+			name: "Complex with int",
+			// Complex<int>
+			expr: &ast.IndexExpr{
+				X:     &ast.Ident{Name: "Complex"},
+				Index: &ast.Ident{Name: "int"},
+			},
+			// Complex<int>
+			wantType: &GenericType{
+				Name:       "Complex",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := InferType(tt.expr, env)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InferType() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("InferType() = %v, want %v", gotType, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferTypeWithRecursiveGenericTypes(t *testing.T) {
+	// Tree<T> = { value: T, left: Tree<T>, right: Tree<T> }
+	env := TypeEnv{
+		"Tree": &GenericType{
+			Name:       "Tree",
+			TypeParams: []Type{&TypeVariable{Name: "T"}},
+			Fields: map[string]Type{
+				"value": &TypeVariable{Name: "T"},
+				"left":  &GenericType{Name: "Tree", TypeParams: []Type{&TypeVariable{Name: "T"}}},
+				"right": &GenericType{Name: "Tree", TypeParams: []Type{&TypeVariable{Name: "T"}}},
+			},
+		},
+		"int": &TypeConstant{Name: "int"},
+	}
+
+	// Tree<int>[int]
+	expr := &ast.IndexExpr{
+		X:     &ast.Ident{Name: "Tree"},
+		Index: &ast.Ident{Name: "int"},
+	}
+
+	result, err := InferType(expr, env)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Tree<int> = { value: int, left: Tree<int>, right: Tree<int> }
+	expected := &GenericType{
+		Name:       "Tree",
+		TypeParams: []Type{&TypeConstant{Name: "int"}},
+		Fields: map[string]Type{
+			"value": &TypeConstant{Name: "int"},
+			"left": &GenericType{
+				Name:       "Tree",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+			},
+			"right": &GenericType{
+				Name:       "Tree",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+			},
+		},
+	}
+
+	if !TypesEqual(result, expected) {
+		t.Errorf("Expected %v, but got %v", expected, result)
+	}
+}
+
+func TestInferTypeWithGenericMethods_Basic(t *testing.T) {
+	// MyStruct<T> = { Convert<T>() T }
+	env := TypeEnv{
+		"MyStruct": &StructType{
+			Name: "MyStruct",
+			GenericMethods: map[string]GenericMethod{
+				"Convert": {
+					Name:       "Convert",
+					TypeParams: []Type{&TypeVariable{Name: "T"}},
+					Method: Method{
+						Name:    "Convert",
+						Params:  []Type{},
+						Results: []Type{&TypeVariable{Name: "T"}},
+					},
+				},
+			},
+		},
+		"int":    &TypeConstant{Name: "int"},
+		"string": &TypeConstant{Name: "string"},
+	}
+
+	// MyStruct.Convert<string>()
+	expr := &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   &ast.Ident{Name: "MyStruct"},
+			Sel: &ast.Ident{Name: "Convert"},
+		},
+		Args: []ast.Expr{
+			&ast.CompositeLit{
+				Elts: []ast.Expr{&ast.Ident{Name: "string"}},
+			},
+		},
+	}
+
+	result, err := InferType(expr, env)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	expected := &TypeConstant{Name: "string"}
+	if !TypesEqual(result, expected) {
+		t.Errorf("Expected %v, but got %v", expected, result)
+	}
+}
+
+func TestInferTypeWithGenericMethods(t *testing.T) {
+	// MyStruct<T> = { Convert<T>() T, Map<T, U>(func(T) U) []U }
+	env := TypeEnv{
+		"MyStruct": &StructType{
+			Name: "MyStruct",
+			GenericMethods: map[string]GenericMethod{
+				"Convert": {
+					Name:       "Convert",
+					TypeParams: []Type{&TypeVariable{Name: "T"}},
+					Method: Method{
+						Name:    "Convert",
+						Params:  []Type{},
+						Results: []Type{&TypeVariable{Name: "T"}},
+					},
+				},
+				"Map": {
+					Name:       "Map",
+					TypeParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
+					Method: Method{
+						Name:    "Map",
+						Params:  []Type{&FunctionType{ParamTypes: []Type{&TypeVariable{Name: "T"}}, ReturnType: &TypeVariable{Name: "U"}}},
+						Results: []Type{&SliceType{ElementType: &TypeVariable{Name: "U"}}},
+					},
+				},
+			},
+		},
+		"int":     &TypeConstant{Name: "int"},
+		"string":  &TypeConstant{Name: "string"},
+		"float64": &TypeConstant{Name: "float64"},
+	}
+
+	tests := []struct {
+		name     string
+		expr     ast.Expr
+		wantType Type
+		wantErr  bool
+	}{
+		{
+			// MyStruct.Convert<string>()
+			name: "Simple generic method",
+			expr: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   &ast.Ident{Name: "MyStruct"},
+					Sel: &ast.Ident{Name: "Convert"},
+				},
+				Args: []ast.Expr{
+					&ast.CompositeLit{
+						Elts: []ast.Expr{&ast.Ident{Name: "string"}},
+					},
+				},
+			},
+			wantType: &TypeConstant{Name: "string"},
+			wantErr:  false,
+		},
+		{
+			// MyStruct.Map<int, string>(func(int) string)
+			name: "Generic method with function parameter",
+			expr: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   &ast.Ident{Name: "MyStruct"},
+					Sel: &ast.Ident{Name: "Map"},
+				},
+				Args: []ast.Expr{
+					&ast.CompositeLit{
+						Elts: []ast.Expr{&ast.Ident{Name: "int"}, &ast.Ident{Name: "string"}},
+					},
+					&ast.FuncLit{
+						Type: &ast.FuncType{
+							Params: &ast.FieldList{
+								List: []*ast.Field{
+									{Type: &ast.Ident{Name: "int"}},
+								},
+							},
+							Results: &ast.FieldList{
+								List: []*ast.Field{
+									{Type: &ast.Ident{Name: "string"}},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantType: &SliceType{ElementType: &TypeConstant{Name: "string"}},
+			wantErr:  false,
+		},
+		{
+			name: "Generic method with incorrect type argument",
+			expr: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   &ast.Ident{Name: "myStruct"},
+					Sel: &ast.Ident{Name: "Convert"},
+				},
+				Args: []ast.Expr{
+					&ast.CompositeLit{
+						Elts: []ast.Expr{&ast.Ident{Name: "unknown"}},
+					},
+				},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+		{
+			name: "Generic method with incorrect number of type arguments",
+			expr: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   &ast.Ident{Name: "myStruct"},
+					Sel: &ast.Ident{Name: "Convert"},
+				},
+				Args: []ast.Expr{
+					&ast.CompositeLit{
+						Elts: []ast.Expr{&ast.Ident{Name: "int"}, &ast.Ident{Name: "string"}},
+					},
+				},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := InferType(tt.expr, env)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InferType(%s) error = %v, wantErr %v", tt.name, err, tt.wantErr)
+				return
+			}
+			if !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("InferType(%s) = %v, want %v", tt.name, gotType, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferTypeGenericInstantiation(t *testing.T) {
+	// Vector<T> = { data: []T }
+	env := TypeEnv{
+		"Vector": &GenericType{
+			Name:       "Vector",
+			TypeParams: []Type{&TypeVariable{Name: "T"}},
+			Fields: map[string]Type{
+				"data": &SliceType{ElementType: &TypeVariable{Name: "T"}},
+			},
+			Constraints: map[string]TypeConstraint{
+				"T": {
+					Types: []Type{
+						&TypeConstant{Name: "int"},
+						&TypeConstant{Name: "float64"},
+					},
+				},
+			},
+		},
+		"int":     &TypeConstant{Name: "int"},
+		"float64": &TypeConstant{Name: "float64"},
+		"string":  &TypeConstant{Name: "string"},
+	}
+
+	tests := []struct {
+		name     string
+		expr     ast.Expr
+		wantType Type
+		wantErr  bool
+	}{
+		{
+			name: "Valid Vector<int> instantiation",
+			expr: &ast.CompositeLit{
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "int"},
+				},
+				Elts: []ast.Expr{
+					&ast.KeyValueExpr{
+						Key:   &ast.Ident{Name: "data"},
+						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "int"}}},
+					},
+				},
+			},
+			wantType: &GenericType{
+				Name:       "Vector",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid Vector<float64> instantiation",
+			expr: &ast.CompositeLit{
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "float64"},
+				},
+				Elts: []ast.Expr{
+					&ast.KeyValueExpr{
+						Key:   &ast.Ident{Name: "data"},
+						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "float64"}}},
+					},
+				},
+			},
+			wantType: &GenericType{
+				Name:       "Vector",
+				TypeParams: []Type{&TypeConstant{Name: "float64"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeConstant{Name: "float64"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Invalid Vector<string> instantiation",
+			expr: &ast.CompositeLit{
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "string"},
+				},
+				Elts: []ast.Expr{
+					&ast.KeyValueExpr{
+						Key:   &ast.Ident{Name: "data"},
+						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "string"}}},
+					},
+				},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+		{
+			name: "Invalid field in Vector<int>",
+			expr: &ast.CompositeLit{
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "int"},
+				},
+				Elts: []ast.Expr{
+					&ast.KeyValueExpr{
+						Key:   &ast.Ident{Name: "invalidField"},
+						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "int"}}},
+					},
+				},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := InferType(tt.expr, env)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InferType(%s) error = %v, wantErr %v", tt.name, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("InferType(%s) = %v, want %v", tt.name, gotType, tt.wantType)
 			}
 		})
 	}

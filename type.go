@@ -79,10 +79,11 @@ func (it *Interface) String() string {
 
 // InterfaceType represents an interface type with methods.
 type InterfaceType struct {
-	Name     string
-	Methods  MethodSet
-	Embedded []Type
-	IsEmpty  bool // true for interface{}
+	Name           string
+	Methods        MethodSet
+	GenericMethods map[string]GenericMethod
+	Embedded       []Type
+	IsEmpty        bool // true for interface{}
 }
 
 func (it *InterfaceType) String() string {
@@ -99,6 +100,26 @@ type Method struct {
 	IsPointer bool
 }
 
+// TODO
+func (m Method) String() string {
+	params := make([]string, len(m.Params))
+	for i, param := range m.Params {
+		params[i] = param.String()
+	}
+
+	results := make([]string, len(m.Results))
+	for i, result := range m.Results {
+		results[i] = result.String()
+	}
+
+	var pointer string
+	if m.IsPointer {
+		pointer = "*"
+	}
+
+	return fmt.Sprintf("%s%s(%s) %s", pointer, m.Name, strings.Join(params, ", "), strings.Join(results, ", "))
+}
+
 type MethodSet map[string]Method
 
 type PointerType struct {
@@ -113,9 +134,10 @@ var _ Type = (*PointerType)(nil)
 
 // StructType represents a struct type with fields and methods.
 type StructType struct {
-	Name    string
-	Fields  map[string]Type
-	Methods MethodSet
+	Name           string
+	Fields         map[string]Type
+	Methods        MethodSet
+	GenericMethods map[string]GenericMethod
 }
 
 func (st *StructType) String() string {
@@ -153,9 +175,17 @@ func (mt *MapType) String() string {
 type TypeConstraint struct {
 	Interfaces []Interface
 	Types      []Type
+	Union      bool // true if this is a union constraint (T1 | T2 | ...)
 }
 
 func (tc *TypeConstraint) String() string {
+	var separator string
+	if tc.Union {
+		separator = " | "
+	} else {
+		separator = ", "
+	}
+
 	var interfaces []string
 	for _, iface := range tc.Interfaces {
 		interfaces = append(interfaces, iface.Name)
@@ -166,7 +196,19 @@ func (tc *TypeConstraint) String() string {
 		types = append(types, t.String())
 	}
 
-	return fmt.Sprintf("Constraint([%s], [%s])", strings.Join(interfaces, ", "), strings.Join(types, ", "))
+	interfacesStr := strings.Join(interfaces, separator)
+	typesStr := strings.Join(types, separator)
+
+	if len(interfaces) > 0 {
+		if tc.Union {
+			return fmt.Sprintf("Union([%s], [%s])", interfacesStr, typesStr)
+		}
+		return fmt.Sprintf("Constraint([%s], [%s])", interfacesStr, typesStr)
+	}
+	if tc.Union {
+		return fmt.Sprintf("Union([], [%s])", typesStr)
+	}
+	return fmt.Sprintf("Constraint([], [%s])", typesStr)
 }
 
 // GenericType represents a generic type with type parameters.
@@ -185,10 +227,40 @@ func (gt *GenericType) String() string {
 	return fmt.Sprintf("Generic(%s, %v)", gt.Name, params)
 }
 
-// TypeEnv store and manage type variables and their types.
-// It acts as a symbol table for type inference, mapping type variable names
-// to their inferred or declared types.
-type TypeEnv map[string]Type
+// GenericMethod represents a generic method with type parameters.
+type GenericMethod struct {
+	Name       string
+	TypeParams []Type
+	Method     Method
+}
+
+// TODO
+func (gm *GenericMethod) String() string {
+	params := make([]string, len(gm.TypeParams))
+	for i, param := range gm.TypeParams {
+		params[i] = param.String()
+	}
+	return fmt.Sprintf("GenericMethod(%s, %v)", gm.Name, params)
+}
+
+// TypeVisitor is a visitor that tracks visited types to prevent infinite recursion.
+type TypeVisitor struct {
+	visited map[string]bool
+}
+
+func NewTypeVisitor() *TypeVisitor {
+	return &TypeVisitor{visited: make(map[string]bool)}
+}
+
+// Visit marks the given type as visited and returns true if it has been visited before.
+func (v *TypeVisitor) Visit(t Type) bool {
+	key := fmt.Sprintf("%p", t)
+	if v.visited[key] {
+		return true
+	}
+	v.visited[key] = true
+	return false
+}
 
 // TypeAlias provides a new name for an existing type.
 type TypeAlias struct {
@@ -199,3 +271,8 @@ type TypeAlias struct {
 func (ta *TypeAlias) String() string {
 	return fmt.Sprintf("TypeAlias(%s = %s)", ta.Name, ta.AliasedTo.String())
 }
+
+// TypeEnv store and manage type variables and their types.
+// It acts as a symbol table for type inference, mapping type variable names
+// to their inferred or declared types.
+type TypeEnv map[string]Type

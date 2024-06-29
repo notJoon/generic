@@ -84,6 +84,7 @@ func Unify(t1, t2 Type, env TypeEnv) error {
 		if t2Slice, ok := t2.(*SliceType); ok {
 			return Unify(t1.ElementType, t2Slice.ElementType, env)
 		}
+		return ErrTypeMismatch
 	case *GenericType:
 		t2Generic, ok := t2.(*GenericType)
 		if !ok || t1.Name != t2Generic.Name || len(t1.TypeParams) != len(t2Generic.TypeParams) {

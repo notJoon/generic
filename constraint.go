@@ -29,6 +29,15 @@ func checkConstraint(t Type, constraint TypeConstraint) bool {
 			}
 		}
 	}
+	if constraint.Union {
+		// for union constraints, the type must match at least one of the constraint types
+		for _, allowedType := range constraint.Types {
+			if TypesEqual(t, allowedType) {
+				return true
+			}
+		}
+		return false
+	}
 	for _, iface := range constraint.Interfaces {
 		if !implInterface(t, iface) {
 			return false

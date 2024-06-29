@@ -56,6 +56,51 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 		}
 		return nil, fmt.Errorf("unknown identifier: %s", expr.Name)
 	case *ast.CallExpr:
+		if selExpr, ok := expr.Fun.(*ast.SelectorExpr); ok {
+			// might be a method call
+			recvType, err := InferType(selExpr.X, env)
+			if err != nil {
+				return nil, err
+			}
+
+			mthdName := selExpr.Sel.Name
+
+			// check if it's a generic method
+			var (
+				genericMethod GenericMethod
+				found         bool
+			)
+
+			switch t := recvType.(type) {
+			case *StructType:
+				genericMethod, found = t.GenericMethods[mthdName]
+			case *InterfaceType:
+				genericMethod, found = t.GenericMethods[mthdName]
+			}
+
+			if found {
+				// it's generic method call
+				if len(expr.Args) == 0 {
+					return nil, fmt.Errorf("generic method call requires type arguments")
+				}
+
+				// the first argument should be the type arguments
+				typeArgs, ok := expr.Args[0].(*ast.CompositeLit)
+				if !ok {
+					return nil, fmt.Errorf("expected type argument for generic method call")
+				}
+
+				var typeArgTypes []Type
+				for _, elt := range typeArgs.Elts {
+					typeArg, err := InferType(elt, env)
+					if err != nil {
+						return nil, err
+					}
+					typeArgTypes = append(typeArgTypes, typeArg)
+				}
+				return inferGenericMethod(genericMethod, typeArgTypes, expr.Args[1:], env)
+			}
+		}
 		funcTyp, err := InferType(expr.Fun, env)
 		if err != nil {
 			return nil, err
@@ -190,7 +235,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 						return nil, err
 					}
 					if !TypesEqual(fieldType, nestedType) {
-						return nil, fmt.Errorf("type mismatch for field %s", fieldName)
+						return nil, fmt.Errorf("type mismatch for field %s: %v. got %v", fieldName, fieldType, nestedType)
 					}
 					newStruct.Fields[fieldName] = nestedType
 				} else {
@@ -199,7 +244,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 						return nil, err
 					}
 					if !TypesEqual(fieldType, fieldValue) {
-						return nil, fmt.Errorf("type mismatch for field %s", fieldName)
+						return nil, fmt.Errorf("type mismatch for field %s: %v. got %v", fieldName, fieldType, fieldValue)
 					}
 					newStruct.Fields[fieldName] = fieldValue
 				}
@@ -235,7 +280,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 
 			// type check the each struct fields
 			for fname, ftype := range gt.Fields {
-				instantiatedFieldType := substituteTypeVar(ftype, gt.TypeParams[0].(*TypeVariable), typeArg)
+				instantiatedFieldType := substituteTypeParams(ftype, gt.TypeParams, []Type{typeArg}, NewTypeVisitor())
 				instantiatedType.Fields[fname] = instantiatedFieldType
 			}
 
@@ -252,7 +297,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 						return nil, err
 					}
 					if err := Unify(fType, vt, env); err != nil {
-						return nil, fmt.Errorf("type mismatch for field %s: %v", fname, err)
+						return nil, fmt.Errorf("type mismatch for field %s: %v. got %v", fname, fType, vt)
 					}
 				}
 			}
@@ -387,7 +432,7 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 	}
 
 	if len(indices) != len(genericType.TypeParams) {
-		return nil, ErrTypeParamsNotMatch
+		return nil, fmt.Errorf("expected %d type parameters, got %d", len(genericType.TypeParams), len(indices))
 	}
 
 	var typeParams []Type
@@ -396,21 +441,121 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 		if err != nil {
 			return nil, err
 		}
-		cst, ok := genericType.Constraints[genericType.TypeParams[i].(*TypeVariable).Name]
-		if ok && !checkConstraint(paramType, cst) {
-			return nil, fmt.Errorf("type argument %v does not satisfy constraint %v", paramType, cst)
+		if i < len(genericType.TypeParams) {
+			paramName := genericType.TypeParams[i].(*TypeVariable).Name
+			if cst, ok := genericType.Constraints[paramName]; ok {
+				if !checkConstraint(paramType, cst) {
+					return nil, fmt.Errorf("type argument %v does not satisfy constraint for %s", paramType, paramName)
+				}
+			}
 		}
 		typeParams = append(typeParams, paramType)
 	}
 
-	if len(typeParams) != len(genericType.TypeParams) {
-		return nil, ErrTypeParamsNotMatch
-	}
-
-	return &GenericType{
+	inferredType := &GenericType{
 		Name:       genericType.Name,
 		TypeParams: typeParams,
-	}, nil
+		Fields:     genericType.Fields, // create new map takes more time than just copying the reference. about 2x slower
+	}
+
+	visitor := NewTypeVisitor()
+	// substitute type parameters in the fields
+	for name, typ := range genericType.Fields {
+		inferredType.Fields[name] = substituteTypeParams(typ, genericType.TypeParams, typeParams, visitor)
+	}
+
+	return inferredType, nil
+}
+
+func inferGenericMethod(method GenericMethod, typeArgs []Type, args []ast.Expr, env TypeEnv) (Type, error) {
+	if len(typeArgs) != len(method.TypeParams) {
+		return nil, fmt.Errorf("expected %d type arguments, got %d", len(method.TypeParams), len(typeArgs))
+	}
+
+	// Create a new environment with type parameters bound to concrete types
+	newEnv := make(TypeEnv)
+	for k, v := range env {
+		newEnv[k] = v
+	}
+	for i, param := range method.TypeParams {
+		newEnv[param.(*TypeVariable).Name] = typeArgs[i]
+	}
+
+	// Substitute type parameters in the method signature
+	substitutedMethod := substituteTypeParams(method.Method, method.TypeParams, typeArgs, NewTypeVisitor()).(Method)
+
+	// Check argument types
+	if len(args) != len(substitutedMethod.Params) {
+		return nil, fmt.Errorf("expected %d arguments, got %d", len(substitutedMethod.Params), len(args))
+	}
+	for i, arg := range args {
+		argType, err := InferType(arg, env)
+		if err != nil {
+			return nil, err
+		}
+		if err := Unify(substitutedMethod.Params[i], argType, newEnv); err != nil {
+			return nil, fmt.Errorf("argument type mismatch: %v", err)
+		}
+	}
+
+	// Substitute type parameters in the result type
+	if len(substitutedMethod.Results) == 0 {
+		return nil, fmt.Errorf("method has no return type")
+	}
+	resultType := substitutedMethod.Results[0]
+	return substituteTypeParams(resultType, method.TypeParams, typeArgs, NewTypeVisitor()), nil
+}
+
+// substituteTypeParams substitutes type parameters in a type with concrete types.
+// It uses a TypeVisitor to detect and handle circular references in the type structure.
+func substituteTypeParams(t Type, from, to []Type, visitor *TypeVisitor) Type {
+	// circular reference check
+	if visitor.Visit(t) {
+		return t
+	}
+	switch t := t.(type) {
+	case *TypeVariable:
+		for i, param := range from {
+			if TypesEqual(t, param) {
+				return to[i]
+			}
+		}
+	case *GenericType:
+		newParams := make([]Type, len(t.TypeParams))
+		for i, param := range t.TypeParams {
+			newParams[i] = substituteTypeParams(param, from, to, visitor)
+		}
+		newFld := make(map[string]Type)
+		for name, typ := range t.Fields {
+			newFld[name] = substituteTypeParams(typ, from, to, visitor)
+		}
+		return &GenericType{
+			Name:       t.Name,
+			TypeParams: newParams,
+			Fields:     t.Fields,
+		}
+	case *SliceType:
+		return &SliceType{
+			ElementType: substituteTypeParams(t.ElementType, from, to, visitor),
+		}
+	case *MapType:
+		return &MapType{
+			KeyType:   substituteTypeParams(t.KeyType, from, to, visitor),
+			ValueType: substituteTypeParams(t.ValueType, from, to, visitor),
+		}
+	case *FunctionType:
+		newParams := make([]Type, len(t.ParamTypes))
+		for i, param := range t.ParamTypes {
+			newParams[i] = substituteTypeParams(param, from, to, visitor)
+		}
+		newReturn := substituteTypeParams(t.ReturnType, from, to, visitor)
+		return &FunctionType{
+			ParamTypes: newParams,
+			ReturnType: newReturn,
+			IsVariadic: t.IsVariadic,
+		}
+	}
+	return t
 }
 
 func substituteTypeVar(t Type, tv *TypeVariable, replacement Type) Type {

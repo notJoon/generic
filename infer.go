@@ -410,7 +410,7 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 	inferredType := &GenericType{
 		Name:       genericType.Name,
 		TypeParams: typeParams,
-		Fields:     genericType.Fields,
+		Fields:     genericType.Fields, // create new map takes more time than just copying the reference. about 2x slower
 	}
 
 	// substitute type parameters in the fields
@@ -423,15 +423,45 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 
 func substituteTypeParams(t Type, from, to []Type) Type {
 	switch t := t.(type) {
+	case *TypeVariable:
+		for i, param := range from {
+			if TypesEqual(t, param) {
+				return to[i]
+			}
+		}
 	case *GenericType:
 		newParams := make([]Type, len(t.TypeParams))
 		for i, param := range t.TypeParams {
 			newParams[i] = substituteTypeParams(param, from, to)
 		}
+		newFld := make(map[string]Type)
+		for name, typ := range t.Fields {
+			newFld[name] = substituteTypeParams(typ, from, to)
+		}
 		return &GenericType{
 			Name:       t.Name,
 			TypeParams: newParams,
 			Fields:     t.Fields,
+		}
+	case *SliceType:
+		return &SliceType{
+			ElementType: substituteTypeParams(t.ElementType, from, to),
+		}
+	case *MapType:
+		return &MapType{
+			KeyType:   substituteTypeParams(t.KeyType, from, to),
+			ValueType: substituteTypeParams(t.ValueType, from, to),
+		}
+	case *FunctionType:
+		newParams := make([]Type, len(t.ParamTypes))
+		for i, param := range t.ParamTypes {
+			newParams[i] = substituteTypeParams(param, from, to)
+		}
+		newReturn := substituteTypeParams(t.ReturnType, from, to)
+		return &FunctionType{
+			ParamTypes: newParams,
+			ReturnType: newReturn,
+			IsVariadic: t.IsVariadic,
 		}
 	}
 	return t

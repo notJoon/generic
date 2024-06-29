@@ -1226,6 +1226,309 @@ func TestInferTypeWithRecursiveGenericTypes(t *testing.T) {
 	}
 }
 
+func TestInferTypeWithGenericMethods_Basic(t *testing.T) {
+	// MyStruct<T> = { Convert<T>() T }
+	env := TypeEnv{
+		"MyStruct": &StructType{
+			Name: "MyStruct",
+			GenericMethods: map[string]GenericMethod{
+				"Convert": {
+					Name:       "Convert",
+					TypeParams: []Type{&TypeVariable{Name: "T"}},
+					Method: Method{
+						Name:    "Convert",
+						Params:  []Type{},
+						Results: []Type{&TypeVariable{Name: "T"}},
+					},
+				},
+			},
+		},
+		"int":    &TypeConstant{Name: "int"},
+		"string": &TypeConstant{Name: "string"},
+	}
+
+	// MyStruct.Convert<string>()
+	expr := &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   &ast.Ident{Name: "MyStruct"},
+			Sel: &ast.Ident{Name: "Convert"},
+		},
+		Args: []ast.Expr{
+			&ast.CompositeLit{
+				Elts: []ast.Expr{&ast.Ident{Name: "string"}},
+			},
+		},
+	}
+
+	result, err := InferType(expr, env)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	expected := &TypeConstant{Name: "string"}
+	if !TypesEqual(result, expected) {
+		t.Errorf("Expected %v, but got %v", expected, result)
+	}
+}
+
+func TestInferTypeWithGenericMethods(t *testing.T) {
+	// MyStruct<T> = { Convert<T>() T, Map<T, U>(func(T) U) []U }
+	env := TypeEnv{
+		"MyStruct": &StructType{
+			Name: "MyStruct",
+			GenericMethods: map[string]GenericMethod{
+				"Convert": {
+					Name:       "Convert",
+					TypeParams: []Type{&TypeVariable{Name: "T"}},
+					Method: Method{
+						Name:    "Convert",
+						Params:  []Type{},
+						Results: []Type{&TypeVariable{Name: "T"}},
+					},
+				},
+				"Map": {
+					Name:       "Map",
+					TypeParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
+					Method: Method{
+						Name:    "Map",
+						Params:  []Type{&FunctionType{ParamTypes: []Type{&TypeVariable{Name: "T"}}, ReturnType: &TypeVariable{Name: "U"}}},
+						Results: []Type{&SliceType{ElementType: &TypeVariable{Name: "U"}}},
+					},
+				},
+			},
+		},
+		"int":     &TypeConstant{Name: "int"},
+		"string":  &TypeConstant{Name: "string"},
+		"float64": &TypeConstant{Name: "float64"},
+	}
+
+	tests := []struct {
+		name     string
+		expr     ast.Expr
+		wantType Type
+		wantErr  bool
+	}{
+		{
+			// MyStruct.Convert<string>()
+			name: "Simple generic method",
+			expr: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   &ast.Ident{Name: "MyStruct"},
+					Sel: &ast.Ident{Name: "Convert"},
+				},
+				Args: []ast.Expr{
+					&ast.CompositeLit{
+						Elts: []ast.Expr{&ast.Ident{Name: "string"}},
+					},
+				},
+			},
+			wantType: &TypeConstant{Name: "string"},
+			wantErr:  false,
+		},
+		{
+			// MyStruct.Map<int, string>(func(int) string)
+			name: "Generic method with function parameter",
+			expr: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   &ast.Ident{Name: "MyStruct"},
+					Sel: &ast.Ident{Name: "Map"},
+				},
+				Args: []ast.Expr{
+					&ast.CompositeLit{
+						Elts: []ast.Expr{&ast.Ident{Name: "int"}, &ast.Ident{Name: "string"}},
+					},
+					&ast.FuncLit{
+						Type: &ast.FuncType{
+							Params: &ast.FieldList{
+								List: []*ast.Field{
+									{Type: &ast.Ident{Name: "int"}},
+								},
+							},
+							Results: &ast.FieldList{
+								List: []*ast.Field{
+									{Type: &ast.Ident{Name: "string"}},
+								},
+							},
+						},
+					},
+				},
+			},
+			wantType: &SliceType{ElementType: &TypeConstant{Name: "string"}},
+			wantErr:  false,
+		},
+		{
+			name: "Generic method with incorrect type argument",
+			expr: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   &ast.Ident{Name: "myStruct"},
+					Sel: &ast.Ident{Name: "Convert"},
+				},
+				Args: []ast.Expr{
+					&ast.CompositeLit{
+						Elts: []ast.Expr{&ast.Ident{Name: "unknown"}},
+					},
+				},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+		{
+			name: "Generic method with incorrect number of type arguments",
+			expr: &ast.CallExpr{
+				Fun: &ast.SelectorExpr{
+					X:   &ast.Ident{Name: "myStruct"},
+					Sel: &ast.Ident{Name: "Convert"},
+				},
+				Args: []ast.Expr{
+					&ast.CompositeLit{
+						Elts: []ast.Expr{&ast.Ident{Name: "int"}, &ast.Ident{Name: "string"}},
+					},
+				},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := InferType(tt.expr, env)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InferType(%s) error = %v, wantErr %v", tt.name, err, tt.wantErr)
+				return
+			}
+			if !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("InferType(%s) = %v, want %v", tt.name, gotType, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferTypeGenericInstantiation(t *testing.T) {
+	// Vector<T> = { data: []T }
+	env := TypeEnv{
+		"Vector": &GenericType{
+			Name:       "Vector",
+			TypeParams: []Type{&TypeVariable{Name: "T"}},
+			Fields: map[string]Type{
+				"data": &SliceType{ElementType: &TypeVariable{Name: "T"}},
+			},
+			Constraints: map[string]TypeConstraint{
+				"T": {
+					Types: []Type{
+						&TypeConstant{Name: "int"},
+						&TypeConstant{Name: "float64"},
+					},
+				},
+			},
+		},
+		"int":     &TypeConstant{Name: "int"},
+		"float64": &TypeConstant{Name: "float64"},
+		"string":  &TypeConstant{Name: "string"},
+	}
+
+	tests := []struct {
+		name     string
+		expr     ast.Expr
+		wantType Type
+		wantErr  bool
+	}{
+		{
+			name: "Valid Vector<int> instantiation",
+			expr: &ast.CompositeLit{
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "int"},
+				},
+				Elts: []ast.Expr{
+					&ast.KeyValueExpr{
+						Key:   &ast.Ident{Name: "data"},
+						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "int"}}},
+					},
+				},
+			},
+			wantType: &GenericType{
+				Name:       "Vector",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid Vector<float64> instantiation",
+			expr: &ast.CompositeLit{
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "float64"},
+				},
+				Elts: []ast.Expr{
+					&ast.KeyValueExpr{
+						Key:   &ast.Ident{Name: "data"},
+						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "float64"}}},
+					},
+				},
+			},
+			wantType: &GenericType{
+				Name:       "Vector",
+				TypeParams: []Type{&TypeConstant{Name: "float64"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeConstant{Name: "float64"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Invalid Vector<string> instantiation",
+			expr: &ast.CompositeLit{
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "string"},
+				},
+				Elts: []ast.Expr{
+					&ast.KeyValueExpr{
+						Key:   &ast.Ident{Name: "data"},
+						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "string"}}},
+					},
+				},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+		{
+			name: "Invalid field in Vector<int>",
+			expr: &ast.CompositeLit{
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "int"},
+				},
+				Elts: []ast.Expr{
+					&ast.KeyValueExpr{
+						Key:   &ast.Ident{Name: "invalidField"},
+						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "int"}}},
+					},
+				},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := InferType(tt.expr, env)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InferType(%s) error = %v, wantErr %v", tt.name, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("InferType(%s) = %v, want %v", tt.name, gotType, tt.wantType)
+			}
+		})
+	}
+}
+
 func TestCalculateStructMethodSet(t *testing.T) {
 	tests := []struct {
 		name     string

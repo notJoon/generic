@@ -203,3 +203,173 @@ func TestUnifyInterface(t *testing.T) {
 		})
 	}
 }
+
+func TestUnifyTupleType(t *testing.T) {
+    tests := []struct {
+        name    string
+        t1      Type
+        t2      Type
+        wantErr error
+    }{
+        {
+            name: "Identical tuples",
+            t1:   &TupleType{Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}}},
+            t2:   &TupleType{Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}}},
+            wantErr: nil,
+        },
+        {
+            name: "Different tuple lengths",
+            t1:   &TupleType{Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}}},
+            t2:   &TupleType{Types: []Type{&TypeConstant{Name: "int"}}},
+            wantErr: ErrArityMismatch,
+        },
+        {
+            name: "Mismatched tuple types",
+            t1:   &TupleType{Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}}},
+            t2:   &TupleType{Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "int"}}},
+            wantErr: ErrTypeMismatch,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            env := TypeEnv{}
+            err := Unify(tt.t1, tt.t2, env)
+            if err != tt.wantErr {
+                t.Errorf("Unify() error = %v, wantErr %v", err, tt.wantErr)
+            }
+        })
+    }
+}
+
+func TestUnifyGenericType(t *testing.T) {
+    tests := []struct {
+        name    string
+        t1      Type
+        t2      Type
+        wantErr error
+    }{
+        {
+            name: "Identical generic types",
+            t1: &GenericType{
+                Name: "List",
+                TypeParams: []Type{&TypeVariable{Name: "T"}},
+            },
+            t2: &GenericType{
+                Name: "List",
+                TypeParams: []Type{&TypeVariable{Name: "T"}},
+            },
+            wantErr: nil,
+        },
+        {
+            name: "Different generic type names",
+            t1: &GenericType{
+                Name: "List",
+                TypeParams: []Type{&TypeVariable{Name: "T"}},
+            },
+            t2: &GenericType{
+                Name: "Vector",
+                TypeParams: []Type{&TypeVariable{Name: "T"}},
+            },
+            wantErr: ErrTypeMismatch,
+        },
+        {
+            name: "Different number of type parameters",
+            t1: &GenericType{
+                Name: "Pair",
+                TypeParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
+            },
+            t2: &GenericType{
+                Name: "Pair",
+                TypeParams: []Type{&TypeVariable{Name: "T"}},
+            },
+            wantErr: ErrTypeMismatch,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            env := TypeEnv{}
+            err := Unify(tt.t1, tt.t2, env)
+            if err != tt.wantErr {
+                t.Errorf("Unify() error = %v, wantErr %v", err, tt.wantErr)
+            }
+        })
+    }
+}
+
+func TestUnifyMapType(t *testing.T) {
+    tests := []struct {
+        name    string
+        t1      Type
+        t2      Type
+        wantErr error
+    }{
+        {
+            name: "Identical map types",
+            t1:   &MapType{KeyType: &TypeConstant{Name: "string"}, ValueType: &TypeConstant{Name: "int"}},
+            t2:   &MapType{KeyType: &TypeConstant{Name: "string"}, ValueType: &TypeConstant{Name: "int"}},
+            wantErr: nil,
+        },
+        {
+            name: "Different key types",
+            t1:   &MapType{KeyType: &TypeConstant{Name: "string"}, ValueType: &TypeConstant{Name: "int"}},
+            t2:   &MapType{KeyType: &TypeConstant{Name: "int"}, ValueType: &TypeConstant{Name: "int"}},
+            wantErr: ErrTypeMismatch,
+        },
+        {
+            name: "Different value types",
+            t1:   &MapType{KeyType: &TypeConstant{Name: "string"}, ValueType: &TypeConstant{Name: "int"}},
+            t2:   &MapType{KeyType: &TypeConstant{Name: "string"}, ValueType: &TypeConstant{Name: "string"}},
+            wantErr: ErrTypeMismatch,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            env := TypeEnv{}
+            err := Unify(tt.t1, tt.t2, env)
+            if err != tt.wantErr {
+                t.Errorf("Unify() error = %v, wantErr %v", err, tt.wantErr)
+            }
+        })
+    }
+}
+
+func TestUnifyPointerType(t *testing.T) {
+    tests := []struct {
+        name    string
+        t1      Type
+        t2      Type
+        wantErr error
+    }{
+        {
+            name: "Identical pointer types",
+            t1:   &PointerType{Base: &TypeConstant{Name: "int"}},
+            t2:   &PointerType{Base: &TypeConstant{Name: "int"}},
+            wantErr: nil,
+        },
+        {
+            name: "Different base types",
+            t1:   &PointerType{Base: &TypeConstant{Name: "int"}},
+            t2:   &PointerType{Base: &TypeConstant{Name: "string"}},
+            wantErr: ErrTypeMismatch,
+        },
+        {
+            name: "Pointer type with non-pointer type",
+            t1:   &PointerType{Base: &TypeConstant{Name: "int"}},
+            t2:   &TypeConstant{Name: "int"},
+            wantErr: ErrTypeMismatch,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            env := TypeEnv{}
+            err := Unify(tt.t1, tt.t2, env)
+            if err != tt.wantErr {
+                t.Errorf("Unify() error = %v, wantErr %v", err, tt.wantErr)
+            }
+        })
+    }
+}

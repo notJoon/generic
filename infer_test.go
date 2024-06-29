@@ -874,192 +874,192 @@ func TestInferTypeWithMultipleTypeParams(t *testing.T) {
 }
 
 func TestInferTypeWithNestedGenericTypes(t *testing.T) {
-    env := TypeEnv{
+	env := TypeEnv{
 		// Map<K, V>
-        "Map": &GenericType{
-            Name: "Map",
-            TypeParams: []Type{
-                &TypeVariable{Name: "K"},
-                &TypeVariable{Name: "V"},
-            },
-            Fields: map[string]Type{
-                "data": &MapType{
-                    KeyType:   &TypeVariable{Name: "K"},
-                    ValueType: &TypeVariable{Name: "V"},
-                },
-            },
-        },
+		"Map": &GenericType{
+			Name: "Map",
+			TypeParams: []Type{
+				&TypeVariable{Name: "K"},
+				&TypeVariable{Name: "V"},
+			},
+			Fields: map[string]Type{
+				"data": &MapType{
+					KeyType:   &TypeVariable{Name: "K"},
+					ValueType: &TypeVariable{Name: "V"},
+				},
+			},
+		},
 		// List<T>
-        "List": &GenericType{
-            Name: "List",
-            TypeParams: []Type{
-                &TypeVariable{Name: "T"},
-            },
-            Fields: map[string]Type{
-                "data": &SliceType{ElementType: &TypeVariable{Name: "T"}},
-            },
-        },
-        "string": &TypeConstant{Name: "string"},
-        "int":    &TypeConstant{Name: "int"},
-    }
+		"List": &GenericType{
+			Name: "List",
+			TypeParams: []Type{
+				&TypeVariable{Name: "T"},
+			},
+			Fields: map[string]Type{
+				"data": &SliceType{ElementType: &TypeVariable{Name: "T"}},
+			},
+		},
+		"string": &TypeConstant{Name: "string"},
+		"int":    &TypeConstant{Name: "int"},
+	}
 
 	// Map<string, List<int>>
-    expr := &ast.IndexListExpr{
-        X: &ast.Ident{Name: "Map"},
-        Indices: []ast.Expr{
-            &ast.Ident{Name: "string"},
-            &ast.IndexExpr{
-                X:     &ast.Ident{Name: "List"},
-                Index: &ast.Ident{Name: "int"},
-            },
-        },
-    }
+	expr := &ast.IndexListExpr{
+		X: &ast.Ident{Name: "Map"},
+		Indices: []ast.Expr{
+			&ast.Ident{Name: "string"},
+			&ast.IndexExpr{
+				X:     &ast.Ident{Name: "List"},
+				Index: &ast.Ident{Name: "int"},
+			},
+		},
+	}
 
-    result, err := InferType(expr, env)
-    if err != nil {
-        t.Fatalf("Unexpected error: %v", err)
-    }
+	result, err := InferType(expr, env)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	// Map<string, List<int>>
-    expected := &GenericType{
-        Name: "Map",
-        TypeParams: []Type{
-            &TypeConstant{Name: "string"},
-            &GenericType{
-                Name:       "List",
-                TypeParams: []Type{&TypeConstant{Name: "int"}},
-                Fields: map[string]Type{
-                    "data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
-                },
-            },
-        },
-        Fields: map[string]Type{
-            "data": &MapType{
-                KeyType: &TypeConstant{Name: "string"},
-                ValueType: &GenericType{
-                    Name:       "List",
-                    TypeParams: []Type{&TypeConstant{Name: "int"}},
-                    Fields: map[string]Type{
-                        "data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
-                    },
-                },
-            },
-        },
-    }
+	expected := &GenericType{
+		Name: "Map",
+		TypeParams: []Type{
+			&TypeConstant{Name: "string"},
+			&GenericType{
+				Name:       "List",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
+				},
+			},
+		},
+		Fields: map[string]Type{
+			"data": &MapType{
+				KeyType: &TypeConstant{Name: "string"},
+				ValueType: &GenericType{
+					Name:       "List",
+					TypeParams: []Type{&TypeConstant{Name: "int"}},
+					Fields: map[string]Type{
+						"data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
+					},
+				},
+			},
+		},
+	}
 
-    if !TypesEqual(result, expected) {
-        t.Errorf("Expected %v, but got %v", expected, result)
-    }
+	if !TypesEqual(result, expected) {
+		t.Errorf("Expected %v, but got %v", expected, result)
+	}
 }
 
 func TestSubstituteTypeParams(t *testing.T) {
-    tests := []struct {
-        name       string
-        t          Type
-        fromParams []Type
-        toParams   []Type
-        expected   Type
-    }{
-        {
-            name:       "Substitute TypeVariable",
-            t:          &TypeVariable{Name: "T"},
-            fromParams: []Type{&TypeVariable{Name: "T"}},
-            toParams:   []Type{&TypeConstant{Name: "int"}},
-            expected:   &TypeConstant{Name: "int"},
-        },
-        {
-            name: "Substitute in GenericType",
-            t: &GenericType{
-                Name:       "List",
-                TypeParams: []Type{&TypeVariable{Name: "T"}},
-                Fields: map[string]Type{
-                    "data": &SliceType{ElementType: &TypeVariable{Name: "T"}},
-                },
-            },
-            fromParams: []Type{&TypeVariable{Name: "T"}},
-            toParams:   []Type{&TypeConstant{Name: "string"}},
-            expected: &GenericType{
-                Name:       "List",
-                TypeParams: []Type{&TypeConstant{Name: "string"}},
-                Fields: map[string]Type{
-                    "data": &SliceType{ElementType: &TypeConstant{Name: "string"}},
-                },
-            },
-        },
-        {
-            name: "Substitute in SliceType",
-            t:    &SliceType{ElementType: &TypeVariable{Name: "T"}},
-            fromParams: []Type{&TypeVariable{Name: "T"}},
-            toParams:   []Type{&TypeConstant{Name: "int"}},
-            expected:   &SliceType{ElementType: &TypeConstant{Name: "int"}},
-        },
-        {
-            name: "Substitute in MapType",
-            t: &MapType{
-                KeyType:   &TypeVariable{Name: "K"},
-                ValueType: &TypeVariable{Name: "V"},
-            },
-            fromParams: []Type{&TypeVariable{Name: "K"}, &TypeVariable{Name: "V"}},
-            toParams:   []Type{&TypeConstant{Name: "string"}, &TypeConstant{Name: "int"}},
-            expected: &MapType{
-                KeyType:   &TypeConstant{Name: "string"},
-                ValueType: &TypeConstant{Name: "int"},
-            },
-        },
-        {
-            name: "Substitute in FunctionType",
-            t: &FunctionType{
-                ParamTypes: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
-                ReturnType: &TypeVariable{Name: "R"},
-            },
-            fromParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}, &TypeVariable{Name: "R"}},
-            toParams:   []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}, &TypeConstant{Name: "bool"}},
-            expected: &FunctionType{
-                ParamTypes: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}},
-                ReturnType: &TypeConstant{Name: "bool"},
-            },
-        },
-        {
-            name: "Substitute in nested GenericType",
-            t: &GenericType{
-                Name: "Outer",
-                TypeParams: []Type{&TypeVariable{Name: "T"}},
-                Fields: map[string]Type{
-                    "inner": &GenericType{
-                        Name:       "Inner",
-                        TypeParams: []Type{&TypeVariable{Name: "U"}},
-                        Fields: map[string]Type{
-                            "data": &TypeVariable{Name: "T"},
-                        },
-                    },
-                },
-            },
-            fromParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
-            toParams:   []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}},
-            expected: &GenericType{
-                Name: "Outer",
-                TypeParams: []Type{&TypeConstant{Name: "int"}},
-                Fields: map[string]Type{
-                    "inner": &GenericType{
-                        Name:       "Inner",
-                        TypeParams: []Type{&TypeConstant{Name: "string"}},
-                        Fields: map[string]Type{
-                            "data": &TypeConstant{Name: "int"},
-                        },
-                    },
-                },
-            },
-        },
-    }
+	tests := []struct {
+		name       string
+		t          Type
+		fromParams []Type
+		toParams   []Type
+		expected   Type
+	}{
+		{
+			name:       "Substitute TypeVariable",
+			t:          &TypeVariable{Name: "T"},
+			fromParams: []Type{&TypeVariable{Name: "T"}},
+			toParams:   []Type{&TypeConstant{Name: "int"}},
+			expected:   &TypeConstant{Name: "int"},
+		},
+		{
+			name: "Substitute in GenericType",
+			t: &GenericType{
+				Name:       "List",
+				TypeParams: []Type{&TypeVariable{Name: "T"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeVariable{Name: "T"}},
+				},
+			},
+			fromParams: []Type{&TypeVariable{Name: "T"}},
+			toParams:   []Type{&TypeConstant{Name: "string"}},
+			expected: &GenericType{
+				Name:       "List",
+				TypeParams: []Type{&TypeConstant{Name: "string"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeConstant{Name: "string"}},
+				},
+			},
+		},
+		{
+			name:       "Substitute in SliceType",
+			t:          &SliceType{ElementType: &TypeVariable{Name: "T"}},
+			fromParams: []Type{&TypeVariable{Name: "T"}},
+			toParams:   []Type{&TypeConstant{Name: "int"}},
+			expected:   &SliceType{ElementType: &TypeConstant{Name: "int"}},
+		},
+		{
+			name: "Substitute in MapType",
+			t: &MapType{
+				KeyType:   &TypeVariable{Name: "K"},
+				ValueType: &TypeVariable{Name: "V"},
+			},
+			fromParams: []Type{&TypeVariable{Name: "K"}, &TypeVariable{Name: "V"}},
+			toParams:   []Type{&TypeConstant{Name: "string"}, &TypeConstant{Name: "int"}},
+			expected: &MapType{
+				KeyType:   &TypeConstant{Name: "string"},
+				ValueType: &TypeConstant{Name: "int"},
+			},
+		},
+		{
+			name: "Substitute in FunctionType",
+			t: &FunctionType{
+				ParamTypes: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
+				ReturnType: &TypeVariable{Name: "R"},
+			},
+			fromParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}, &TypeVariable{Name: "R"}},
+			toParams:   []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}, &TypeConstant{Name: "bool"}},
+			expected: &FunctionType{
+				ParamTypes: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}},
+				ReturnType: &TypeConstant{Name: "bool"},
+			},
+		},
+		{
+			name: "Substitute in nested GenericType",
+			t: &GenericType{
+				Name:       "Outer",
+				TypeParams: []Type{&TypeVariable{Name: "T"}},
+				Fields: map[string]Type{
+					"inner": &GenericType{
+						Name:       "Inner",
+						TypeParams: []Type{&TypeVariable{Name: "U"}},
+						Fields: map[string]Type{
+							"data": &TypeVariable{Name: "T"},
+						},
+					},
+				},
+			},
+			fromParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
+			toParams:   []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}},
+			expected: &GenericType{
+				Name:       "Outer",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+				Fields: map[string]Type{
+					"inner": &GenericType{
+						Name:       "Inner",
+						TypeParams: []Type{&TypeConstant{Name: "string"}},
+						Fields: map[string]Type{
+							"data": &TypeConstant{Name: "int"},
+						},
+					},
+				},
+			},
+		},
+	}
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            result := substituteTypeParams(tt.t, tt.fromParams, tt.toParams)
-            if !TypesEqual(result, tt.expected) {
-                t.Errorf("substituteTypeParams() = %v, want %v", result, tt.expected)
-            }
-        })
-    }
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := substituteTypeParams(tt.t, tt.fromParams, tt.toParams)
+			if !TypesEqual(result, tt.expected) {
+				t.Errorf("substituteTypeParams() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
 }
 
 func TestCalculateStructMethodSet(t *testing.T) {

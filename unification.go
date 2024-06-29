@@ -50,19 +50,36 @@ func Unify(t1, t2 Type, env TypeEnv) error {
 		}
 		return nil
 	case *FunctionType:
-		t2, ok := t2.(*FunctionType)
+		t2Func, ok := t2.(*FunctionType)
 		if !ok {
 			return ErrTypeMismatch
 		}
-		if len(t1.ParamTypes) != len(t2.ParamTypes) {
+		if t1.IsVariadic != t2Func.IsVariadic {
+			return ErrTypeMismatch
+		}
+		if len(t1.ParamTypes) != len(t2Func.ParamTypes) {
 			return ErrArityMismatch
 		}
 		for i := range t1.ParamTypes {
-			if err := Unify(t1.ParamTypes[i], t2.ParamTypes[i], env); err != nil {
+			if err := Unify(t1.ParamTypes[i], t2Func.ParamTypes[i], env); err != nil {
 				return err
 			}
 		}
-		return Unify(t1.ReturnType, t2.ReturnType, env)
+		return Unify(t1.ReturnType, t2Func.ReturnType, env)
+	case *TupleType:
+		t2Tuple, ok := t2.(*TupleType)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		if len(t1.Types) != len(t2Tuple.Types) {
+			return ErrArityMismatch
+		}
+		for i := range t1.Types {
+			if err := Unify(t1.Types[i], t2Tuple.Types[i], env); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *SliceType:
 		if t2Slice, ok := t2.(*SliceType); ok {
 			return Unify(t1.ElementType, t2Slice.ElementType, env)

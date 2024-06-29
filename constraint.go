@@ -100,16 +100,33 @@ func TypesEqual(t1, t2 Type) bool {
 		t2, ok := t2.(*TypeVariable)
 		return ok && t1.Name == t2.Name
 	case *FunctionType:
-		t2, ok := t2.(*FunctionType)
-		if !ok || len(t1.ParamTypes) != len(t2.ParamTypes) {
+		t2Func, ok := t2.(*FunctionType)
+		if !ok {
+			return false
+		}
+		if len(t1.ParamTypes) != len(t2Func.ParamTypes) {
+			return false
+		}
+		if t1.IsVariadic != t2Func.IsVariadic {
 			return false
 		}
 		for i := range t1.ParamTypes {
-			if !TypesEqual(t1.ParamTypes[i], t2.ParamTypes[i]) {
+			if !TypesEqual(t1.ParamTypes[i], t2Func.ParamTypes[i]) {
 				return false
 			}
 		}
-		return TypesEqual(t1.ReturnType, t2.ReturnType)
+		return TypesEqual(t1.ReturnType, t2Func.ReturnType)
+	case *TupleType:
+		t2Tuple, ok := t2.(*TupleType)
+		if !ok || len(t1.Types) != len(t2Tuple.Types) {
+			return false
+		}
+		for i := range t1.Types {
+			if !TypesEqual(t1.Types[i], t2Tuple.Types[i]) {
+				return false
+			}
+		}
+		return true
 	case *GenericType:
 		t2, ok := t2.(*GenericType)
 		if !ok || t1.Name != t2.Name || len(t1.TypeParams) != len(t2.TypeParams) {

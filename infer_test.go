@@ -31,7 +31,7 @@ func TestInferType(t *testing.T) {
 			expr:     &ast.Ident{Name: "y"},
 			env:      TypeEnv{},
 			wantType: nil,
-			wantErr:  ErrUnknownIdent,
+			wantErr:  fmt.Errorf("unknown identifier: y"),
 		},
 		{
 			name: "Infer type of function call",
@@ -1109,121 +1109,352 @@ func diffStrings(a, b string) string {
 }
 
 func TestInferTypeSpec(t *testing.T) {
-    tests := []struct {
-        name     string
-        spec     *ast.TypeSpec
-        env      TypeEnv
-        wantType Type
-        wantErr  error
-    }{
-        {
-            name: "Simple type alias",
-            spec: &ast.TypeSpec{
-                Name:   &ast.Ident{Name: "MyInt"},
-                Assign: token.Pos(1), // 1 is a valid non-zero position
-                Type:   &ast.Ident{Name: "int"},
-            },
-            env: TypeEnv{"int": &TypeConstant{Name: "int"}},
-            wantType: &TypeAlias{
-                Name:      "MyInt",
-                AliasedTo: &TypeConstant{Name: "int"},
-            },
-            wantErr: nil,
-        },
+	tests := []struct {
+		name     string
+		spec     *ast.TypeSpec
+		env      TypeEnv
+		wantType Type
+		wantErr  error
+	}{
 		{
-            name: "Type alias to a custom type",
-            spec: &ast.TypeSpec{
-                Name:   &ast.Ident{Name: "MyCustomType"},
-                Assign: token.Pos(1),
-                Type:   &ast.Ident{Name: "CustomType"},
-            },
-            env: TypeEnv{"CustomType": &StructType{Name: "CustomType"}},
-            wantType: &TypeAlias{
-                Name:      "MyCustomType",
-                AliasedTo: &StructType{Name: "CustomType"},
-            },
-            wantErr: nil,
-        },
-        {
-            name: "Type alias to a generic type",
-            spec: &ast.TypeSpec{
-                Name:   &ast.Ident{Name: "MyVector"},
-                Assign: token.Pos(1),
-                Type: &ast.IndexExpr{
-                    X:     &ast.Ident{Name: "Vector"},
-                    Index: &ast.Ident{Name: "int"},
-                },
-            },
-            env: TypeEnv{
-                "Vector": &GenericType{
-                    Name:       "Vector",
-                    TypeParams: []Type{&TypeVariable{Name: "T"}},
-                },
-                "int": &TypeConstant{Name: "int"},
-            },
-            wantType: &TypeAlias{
-                Name: "MyVector",
-                AliasedTo: &GenericType{
-                    Name:       "Vector",
-                    TypeParams: []Type{&TypeConstant{Name: "int"}},
-                },
-            },
-            wantErr: nil,
-        },
-        {
-            name: "Type alias to an unknown type",
-            spec: &ast.TypeSpec{
-                Name:   &ast.Ident{Name: "MyUnknown"},
-                Assign: token.Pos(1),
-                Type:   &ast.Ident{Name: "UnknownType"},
-            },
-            env: TypeEnv{},
-            wantType: nil,
-            wantErr:  fmt.Errorf("unknown identifier"),
-        },
-        {
-            name: "New interface type declaration",
-            spec: &ast.TypeSpec{
-                Name: &ast.Ident{Name: "MyInterface"},
-                Type: &ast.InterfaceType{
-                    Methods: &ast.FieldList{
-                        List: []*ast.Field{
-                            {
-                                Names: []*ast.Ident{{Name: "Method1"}},
-                                Type: &ast.FuncType{
-                                    Params:  &ast.FieldList{},
-                                    Results: &ast.FieldList{List: []*ast.Field{{Type: &ast.Ident{Name: "int"}}}},
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-            env: TypeEnv{"int": &TypeConstant{Name: "int"}},
-            wantType: &InterfaceType{
-                Name: "MyInterface",
-                Methods: MethodSet{
-                    "Method1": Method{
-                        Name:    "Method1",
-                        Params:  []Type{},
-                        Results: []Type{&TypeConstant{Name: "int"}},
-                    },
-                },
-            },
-            wantErr: nil,
-        },
-    }
+			name: "Simple type alias",
+			spec: &ast.TypeSpec{
+				Name:   &ast.Ident{Name: "MyInt"},
+				Assign: token.Pos(1), // 1 is a valid non-zero position
+				Type:   &ast.Ident{Name: "int"},
+			},
+			env: TypeEnv{"int": &TypeConstant{Name: "int"}},
+			wantType: &TypeAlias{
+				Name:      "MyInt",
+				AliasedTo: &TypeConstant{Name: "int"},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Type alias to a custom type",
+			spec: &ast.TypeSpec{
+				Name:   &ast.Ident{Name: "MyCustomType"},
+				Assign: token.Pos(1),
+				Type:   &ast.Ident{Name: "CustomType"},
+			},
+			env: TypeEnv{"CustomType": &StructType{Name: "CustomType"}},
+			wantType: &TypeAlias{
+				Name:      "MyCustomType",
+				AliasedTo: &StructType{Name: "CustomType"},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Type alias to a generic type",
+			spec: &ast.TypeSpec{
+				Name:   &ast.Ident{Name: "MyVector"},
+				Assign: token.Pos(1),
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "int"},
+				},
+			},
+			env: TypeEnv{
+				"Vector": &GenericType{
+					Name:       "Vector",
+					TypeParams: []Type{&TypeVariable{Name: "T"}},
+				},
+				"int": &TypeConstant{Name: "int"},
+			},
+			wantType: &TypeAlias{
+				Name: "MyVector",
+				AliasedTo: &GenericType{
+					Name:       "Vector",
+					TypeParams: []Type{&TypeConstant{Name: "int"}},
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Type alias to an unknown type",
+			spec: &ast.TypeSpec{
+				Name:   &ast.Ident{Name: "MyUnknown"},
+				Assign: token.Pos(1),
+				Type:   &ast.Ident{Name: "UnknownType"},
+			},
+			env:      TypeEnv{},
+			wantType: nil,
+			wantErr:  fmt.Errorf("unknown identifier: UnknownType"),
+		},
+		{
+			name: "New interface type declaration",
+			spec: &ast.TypeSpec{
+				Name: &ast.Ident{Name: "MyInterface"},
+				Type: &ast.InterfaceType{
+					Methods: &ast.FieldList{
+						List: []*ast.Field{
+							{
+								Names: []*ast.Ident{{Name: "Method1"}},
+								Type: &ast.FuncType{
+									Params:  &ast.FieldList{},
+									Results: &ast.FieldList{List: []*ast.Field{{Type: &ast.Ident{Name: "int"}}}},
+								},
+							},
+						},
+					},
+				},
+			},
+			env: TypeEnv{"int": &TypeConstant{Name: "int"}},
+			wantType: &InterfaceType{
+				Name: "MyInterface",
+				Methods: MethodSet{
+					"Method1": Method{
+						Name:    "Method1",
+						Params:  []Type{},
+						Results: []Type{&TypeConstant{Name: "int"}},
+					},
+				},
+			},
+			wantErr: nil,
+		},
+	}
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            got, err := inferTypeSpec(tt.spec, tt.env)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := inferTypeSpec(tt.spec, tt.env)
 			if err != nil && err.Error() != tt.wantErr.Error() {
 				t.Errorf("InferTypeSpec() error diff:\n%s", diffStrings(err.Error(), tt.wantErr.Error()))
 				return
 			}
-            if !TypesEqual(got, tt.wantType) {
-                t.Errorf("InferTypeSpec() = %v, want %v", got, tt.wantType)
-            }
-        })
-    }
+			if !TypesEqual(got, tt.wantType) {
+				t.Errorf("InferTypeSpec() = %v, want %v", got, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		results  *ast.FieldList
+		env      TypeEnv
+		wantType Type
+		wantErr  error
+	}{
+		{
+			name:     "No return value",
+			results:  &ast.FieldList{},
+			env:      TypeEnv{},
+			wantType: &TypeConstant{Name: "void"},
+			wantErr:  nil,
+		},
+		{
+			name: "Single return value",
+			results: &ast.FieldList{
+				List: []*ast.Field{
+					{Type: &ast.Ident{Name: "int"}},
+				},
+			},
+			env:      TypeEnv{"int": &TypeConstant{Name: "int"}},
+			wantType: &TypeConstant{Name: "int"},
+			wantErr:  nil,
+		},
+		{
+			name: "Multiple return values",
+			results: &ast.FieldList{
+				List: []*ast.Field{
+					{Type: &ast.Ident{Name: "int"}},
+					{Type: &ast.Ident{Name: "string"}},
+				},
+			},
+			env: TypeEnv{
+				"int":    &TypeConstant{Name: "int"},
+				"string": &TypeConstant{Name: "string"},
+			},
+			wantType: &TupleType{
+				Types: []Type{
+					&TypeConstant{Name: "int"},
+					&TypeConstant{Name: "string"},
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Named return values",
+			results: &ast.FieldList{
+				List: []*ast.Field{
+					{Names: []*ast.Ident{{Name: "x"}}, Type: &ast.Ident{Name: "int"}},
+					{Names: []*ast.Ident{{Name: "y"}}, Type: &ast.Ident{Name: "string"}},
+				},
+			},
+			env: TypeEnv{
+				"int":    &TypeConstant{Name: "int"},
+				"string": &TypeConstant{Name: "string"},
+			},
+			wantType: &TupleType{
+				Types: []Type{
+					&TypeConstant{Name: "int"},
+					&TypeConstant{Name: "string"},
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Mixed named and unnamed return values",
+			results: &ast.FieldList{
+				List: []*ast.Field{
+					{Names: []*ast.Ident{{Name: "x"}}, Type: &ast.Ident{Name: "int"}},
+					{Type: &ast.Ident{Name: "string"}},
+				},
+			},
+			env: TypeEnv{
+				"int":    &TypeConstant{Name: "int"},
+				"string": &TypeConstant{Name: "string"},
+			},
+			wantType: &TupleType{
+				Types: []Type{
+					&TypeConstant{Name: "int"},
+					&TypeConstant{Name: "string"},
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Unknown return type",
+			results: &ast.FieldList{
+				List: []*ast.Field{
+					{Type: &ast.Ident{Name: "UnknownType"}},
+				},
+			},
+			env:      TypeEnv{},
+			wantType: nil,
+			wantErr:  fmt.Errorf("unknown identifier: UnknownType"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := inferResult(tt.results, tt.env)
+			if (err != nil) != (tt.wantErr != nil) {
+				t.Errorf("inferResult() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.wantErr != nil && err.Error() != tt.wantErr.Error() {
+				t.Errorf("inferResult() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !TypesEqual(got, tt.wantType) {
+				t.Errorf("inferResult() = %v, want %v", got, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferVariadicFunction(t *testing.T) {
+	expr := &ast.FuncType{
+		Params: &ast.FieldList{
+			List: []*ast.Field{
+				{Names: []*ast.Ident{{Name: "x"}}, Type: &ast.Ident{Name: "int"}},
+				{Names: []*ast.Ident{{Name: "y"}}, Type: &ast.Ellipsis{Elt: &ast.Ident{Name: "string"}}},
+			},
+		},
+		Results: &ast.FieldList{
+			List: []*ast.Field{{Type: &ast.Ident{Name: "bool"}}},
+		},
+	}
+
+	env := TypeEnv{
+		"int":    &TypeConstant{Name: "int"},
+		"string": &TypeConstant{Name: "string"},
+		"bool":   &TypeConstant{Name: "bool"},
+	}
+
+	expected := &FunctionType{
+		ParamTypes: []Type{
+			&TypeConstant{Name: "int"},
+			&SliceType{ElementType: &TypeConstant{Name: "string"}},
+		},
+		ReturnType: &TypeConstant{Name: "bool"},
+		IsVariadic: true,
+	}
+
+	result, err := InferType(expr, env)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if !TypesEqual(result, expected) {
+		t.Errorf("Expected %v, but got %v", expected, result)
+	}
+}
+
+func TestInferTypeEllipsis(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     ast.Expr
+		env      TypeEnv
+		wantType Type
+		wantErr  error
+	}{
+		{
+			name: "Ellipsis with int type",
+			expr: &ast.Ellipsis{Elt: &ast.Ident{Name: "int"}},
+			env:  TypeEnv{"int": &TypeConstant{Name: "int"}},
+			wantType: &SliceType{
+				ElementType: &TypeConstant{Name: "int"},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Empty ellipsis",
+			expr: &ast.Ellipsis{Elt: nil},
+			env:  TypeEnv{},
+			wantType: &SliceType{
+				ElementType: &InterfaceType{Name: "interface{}", IsEmpty: true},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Ellipsis with custom type",
+			expr: &ast.Ellipsis{Elt: &ast.Ident{Name: "CustomType"}},
+			env:  TypeEnv{"CustomType": &StructType{Name: "CustomType"}},
+			wantType: &SliceType{
+				ElementType: &StructType{Name: "CustomType"},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Ellipsis with generic type",
+			expr: &ast.Ellipsis{Elt: &ast.IndexExpr{
+				X:     &ast.Ident{Name: "Vector"},
+				Index: &ast.Ident{Name: "int"},
+			}},
+			env: TypeEnv{
+				"Vector": &GenericType{
+					Name:       "Vector",
+					TypeParams: []Type{&TypeVariable{Name: "T"}},
+				},
+				"int": &TypeConstant{Name: "int"},
+			},
+			wantType: &SliceType{
+				ElementType: &GenericType{
+					Name:       "Vector",
+					TypeParams: []Type{&TypeConstant{Name: "int"}},
+				},
+			},
+			wantErr: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := InferType(tt.expr, tt.env)
+			if (err != nil) != (tt.wantErr != nil) {
+				t.Errorf("InferType() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.wantErr != nil && err.Error() != tt.wantErr.Error() {
+				t.Errorf("InferType() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !TypesEqual(got, tt.wantType) {
+				t.Errorf("InferType() = %v, want %v", got, tt.wantType)
+			}
+		})
+	}
 }

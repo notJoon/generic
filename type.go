@@ -1,6 +1,11 @@
 package generic
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
+
+// TODO: print type more go-like
 
 // Type represents any type in the type system.
 // It serves as the base interface for all types in the generic type system.
@@ -34,6 +39,7 @@ func (tc *TypeConstant) String() string {
 type FunctionType struct {
 	ParamTypes []Type
 	ReturnType Type
+	IsVariadic bool
 }
 
 func (ft *FunctionType) String() string {
@@ -41,7 +47,25 @@ func (ft *FunctionType) String() string {
 	for i, param := range ft.ParamTypes {
 		params[i] = param.String()
 	}
-	return fmt.Sprintf("Func(%v) -> %s", params, ft.ReturnType.String())
+
+	var variadic string
+	if ft.IsVariadic {
+		variadic = "..."
+	}
+
+	return fmt.Sprintf("func(%s%s) %s", strings.Join(params, ", "), variadic, ft.ReturnType.String())
+}
+
+type TupleType struct {
+	Types []Type
+}
+
+func (tt *TupleType) String() string {
+	ts := make([]string, len(tt.Types))
+	for i, t := range tt.Types {
+		ts[i] = t.String()
+	}
+	return fmt.Sprintf("(%s)", strings.Join(ts, ", "))
 }
 
 type Interface struct {
@@ -113,7 +137,7 @@ type ArrayType struct {
 }
 
 func (at *ArrayType) String() string {
-	return fmt.Sprintf("[%d]%s", at.Len, at.ElementType.String())
+	return fmt.Sprintf("Arr[%d]%s", at.Len, at.ElementType.String())
 }
 
 // MapType represents a map type
@@ -132,7 +156,17 @@ type TypeConstraint struct {
 }
 
 func (tc *TypeConstraint) String() string {
-	return fmt.Sprintf("Constraint(%v, %v)", tc.Interfaces, tc.Types)
+	var interfaces []string
+	for _, iface := range tc.Interfaces {
+		interfaces = append(interfaces, iface.Name)
+	}
+
+	var types []string
+	for _, t := range tc.Types {
+		types = append(types, t.String())
+	}
+
+	return fmt.Sprintf("Constraint([%s], [%s])", strings.Join(interfaces, ", "), strings.Join(types, ", "))
 }
 
 // GenericType represents a generic type with type parameters.
@@ -158,7 +192,7 @@ type TypeEnv map[string]Type
 
 // TypeAlias provides a new name for an existing type.
 type TypeAlias struct {
-	Name string
+	Name      string
 	AliasedTo Type
 }
 

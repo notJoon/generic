@@ -54,7 +54,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 			}
 			return typ, nil
 		}
-		return nil, ErrUnknownIdent
+		return nil, fmt.Errorf("unknown identifier: %s", expr.Name)
 	case *ast.CallExpr:
 		funcTyp, err := InferType(expr.Fun, env)
 		if err != nil {
@@ -280,8 +280,34 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 			return nil, err
 		}
 		return &PointerType{Base: bt}, nil
+	case *ast.FuncType:
+		ptypes, err := inferParams(expr.Params, env)
+		if err != nil {
+			return nil, err
+		}
+		retType, err := inferResult(expr.Results, env)
+		if err != nil {
+			return nil, err
+		}
+		isVariadic := expr.Params.NumFields() > 0 && expr.Params.List[len(expr.Params.List)-1].Type.(*ast.Ellipsis) != nil
+		return &FunctionType{
+			ParamTypes: ptypes,
+			ReturnType: retType,
+			IsVariadic: isVariadic,
+		}, nil
 	case *ast.FuncLit:
 		return inferFunctionType(expr.Type, env)
+	case *ast.Ellipsis:
+		if expr.Elt == nil {
+			return &SliceType{
+				ElementType: &InterfaceType{Name: "interface{}", IsEmpty: true},
+			}, nil
+		}
+		elemType, err := InferType(expr.Elt, env)
+		if err != nil {
+			return nil, err
+		}
+		return &SliceType{ElementType: elemType}, nil
 	case *ast.InterfaceType:
 		iface := &InterfaceType{Name: "", Methods: MethodSet{}, Embedded: []Type{}}
 		for _, field := range expr.Methods.List {
@@ -499,6 +525,37 @@ func inferParams(fieldList *ast.FieldList, env TypeEnv) ([]Type, error) {
 	return params, nil
 }
 
+func inferResult(results *ast.FieldList, env TypeEnv) (Type, error) {
+	if results == nil || len(results.List) == 0 {
+		return &TypeConstant{Name: "void"}, nil
+	}
+
+	if len(results.List) == 1 && len(results.List[0].Names) == 0 {
+		// single return value
+		return InferType(results.List[0].Type, env)
+	}
+
+	// multiple return values. like tuple type or anonymous struct type
+	var tt []Type
+	for _, fld := range results.List {
+		fldType, err := InferType(fld.Type, env)
+		if err != nil {
+			if strings.HasPrefix(err.Error(), "unknown identifier") {
+				return nil, fmt.Errorf("unknown type: %s", strings.TrimPrefix(err.Error(), "unknown identifier: "))
+			}
+			return nil, err
+		}
+		if len(fld.Names) == 0 {
+			tt = append(tt, fldType)
+		} else {
+			for range fld.Names {
+				tt = append(tt, fldType)
+			}
+		}
+	}
+	return &TupleType{Types: tt}, nil
+}
+
 func inferTypeSpec(spec *ast.TypeSpec, env TypeEnv) (Type, error) {
 	// type alias
 	if spec.Assign.IsValid() {
@@ -507,7 +564,7 @@ func inferTypeSpec(spec *ast.TypeSpec, env TypeEnv) (Type, error) {
 			return nil, err
 		}
 		alias := &TypeAlias{
-			Name:   spec.Name.Name,
+			Name:      spec.Name.Name,
 			AliasedTo: aliased,
 		}
 		env[spec.Name.Name] = alias // add the alias to the environment
@@ -524,16 +581,16 @@ func inferTypeSpec(spec *ast.TypeSpec, env TypeEnv) (Type, error) {
 	switch t := definedType.(type) {
 	case *StructType:
 		newType := &StructType{
-			Name:   spec.Name.Name,
-			Fields: t.Fields,
+			Name:    spec.Name.Name,
+			Fields:  t.Fields,
 			Methods: t.Methods,
 		}
 		env[spec.Name.Name] = newType
 		return newType, nil
 	case *InterfaceType:
 		newType := &InterfaceType{
-			Name:    spec.Name.Name,
-			Methods: t.Methods,
+			Name:     spec.Name.Name,
+			Methods:  t.Methods,
 			Embedded: t.Embedded,
 		}
 		env[spec.Name.Name] = newType
@@ -545,26 +602,26 @@ func inferTypeSpec(spec *ast.TypeSpec, env TypeEnv) (Type, error) {
 }
 
 func InferPackageTypes(file *ast.File, env TypeEnv) (TypeEnv, error) {
-    for _, decl := range file.Decls {
-        genDecl, ok := decl.(*ast.GenDecl)
-        if !ok || genDecl.Tok != token.TYPE {
-            continue
-        }
-        
-        for _, spec := range genDecl.Specs {
-            typeSpec, ok := spec.(*ast.TypeSpec)
-            if !ok {
-                continue
-            }
-            
-            inferredType, err := inferTypeSpec(typeSpec, env)
-            if err != nil {
-                return nil, err
-            }
-            
-            env[typeSpec.Name.Name] = inferredType
-        }
-    }
-    
-    return env, nil
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.TYPE {
+			continue
+		}
+
+		for _, spec := range genDecl.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+
+			inferredType, err := inferTypeSpec(typeSpec, env)
+			if err != nil {
+				return nil, err
+			}
+
+			env[typeSpec.Name.Name] = inferredType
+		}
+	}
+
+	return env, nil
 }

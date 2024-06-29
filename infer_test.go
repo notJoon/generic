@@ -159,7 +159,7 @@ func TestInferType(t *testing.T) {
 				"bool":   &TypeConstant{Name: "bool"},
 			},
 			wantType: nil,
-			wantErr:  ErrTypeParamsNotMatch,
+			wantErr:  fmt.Errorf("expected 2 type parameters, got 3"),
 		},
 		{
 			name: "Infer type of nested generic type",
@@ -691,7 +691,7 @@ func TestInferType(t *testing.T) {
 				"string": &TypeConstant{Name: "string"},
 			},
 			wantType: nil,
-			wantErr:  fmt.Errorf("type argument TypeConst(string) does not satisfy constraint {[] [TypeConst(int) TypeConst(float32) TypeConst(float64)]}"),
+			wantErr:  fmt.Errorf("type argument TypeConst(string) does not satisfy constraint for T"),
 		},
 		{
 			name: "Infer type of non-generic type as generic",
@@ -823,6 +823,53 @@ func TestInferType(t *testing.T) {
 				t.Errorf("InferType() = %v, want %v", gotType, tt.wantType)
 			}
 		})
+	}
+}
+
+func TestInferTypeWithMultipleTypeParams(t *testing.T) {
+	env := TypeEnv{
+		"Pair": &GenericType{
+			Name: "Pair",
+			TypeParams: []Type{
+				&TypeVariable{Name: "T"},
+				&TypeVariable{Name: "U"},
+			},
+			Fields: map[string]Type{
+				"First":  &TypeVariable{Name: "T"},
+				"Second": &TypeVariable{Name: "U"},
+			},
+		},
+		"int":    &TypeConstant{Name: "int"},
+		"string": &TypeConstant{Name: "string"},
+	}
+
+	expr := &ast.IndexListExpr{
+		X: &ast.Ident{Name: "Pair"},
+		Indices: []ast.Expr{
+			&ast.Ident{Name: "int"},
+			&ast.Ident{Name: "string"},
+		},
+	}
+
+	result, err := InferType(expr, env)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	expected := &GenericType{
+		Name: "Pair",
+		TypeParams: []Type{
+			&TypeConstant{Name: "int"},
+			&TypeConstant{Name: "string"},
+		},
+		Fields: map[string]Type{
+			"First":  &TypeConstant{Name: "int"},
+			"Second": &TypeConstant{Name: "string"},
+		},
+	}
+
+	if !TypesEqual(result, expected) {
+		t.Errorf("Expected %v, but got %v", expected, result)
 	}
 }
 

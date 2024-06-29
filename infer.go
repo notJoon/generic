@@ -387,7 +387,7 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 	}
 
 	if len(indices) != len(genericType.TypeParams) {
-		return nil, ErrTypeParamsNotMatch
+		return nil, fmt.Errorf("expected %d type parameters, got %d", len(genericType.TypeParams), len(indices))
 	}
 
 	var typeParams []Type
@@ -396,21 +396,45 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 		if err != nil {
 			return nil, err
 		}
-		cst, ok := genericType.Constraints[genericType.TypeParams[i].(*TypeVariable).Name]
-		if ok && !checkConstraint(paramType, cst) {
-			return nil, fmt.Errorf("type argument %v does not satisfy constraint %v", paramType, cst)
+		if i < len(genericType.TypeParams) {
+			paramName := genericType.TypeParams[i].(*TypeVariable).Name
+			if cst, ok := genericType.Constraints[paramName]; ok {
+				if !checkConstraint(paramType, cst) {
+					return nil, fmt.Errorf("type argument %v does not satisfy constraint for %s", paramType, paramName)
+				}
+			}
 		}
 		typeParams = append(typeParams, paramType)
 	}
 
-	if len(typeParams) != len(genericType.TypeParams) {
-		return nil, ErrTypeParamsNotMatch
-	}
-
-	return &GenericType{
+	inferredType := &GenericType{
 		Name:       genericType.Name,
 		TypeParams: typeParams,
-	}, nil
+		Fields:     genericType.Fields,
+	}
+
+	// substitute type parameters in the fields
+	for name, typ := range genericType.Fields {
+		inferredType.Fields[name] = substituteTypeParams(typ, genericType.TypeParams, typeParams)
+	}
+
+	return inferredType, nil
+}
+
+func substituteTypeParams(t Type, from, to []Type) Type {
+	switch t := t.(type) {
+	case *GenericType:
+		newParams := make([]Type, len(t.TypeParams))
+		for i, param := range t.TypeParams {
+			newParams[i] = substituteTypeParams(param, from, to)
+		}
+		return &GenericType{
+			Name:       t.Name,
+			TypeParams: newParams,
+			Fields:     t.Fields,
+		}
+	}
+	return t
 }
 
 func substituteTypeVar(t Type, tv *TypeVariable, replacement Type) Type {

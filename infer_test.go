@@ -953,6 +953,7 @@ func TestInferTypeWithNestedGenericTypes(t *testing.T) {
 }
 
 func TestSubstituteTypeParams(t *testing.T) {
+	visitor := NewTypeVisitor()
 	tests := []struct {
 		name       string
 		t          Type
@@ -1054,7 +1055,7 @@ func TestSubstituteTypeParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := substituteTypeParams(tt.t, tt.fromParams, tt.toParams)
+			result := substituteTypeParams(tt.t, tt.fromParams, tt.toParams, visitor)
 			if !TypesEqual(result, tt.expected) {
 				t.Errorf("substituteTypeParams() = %v, want %v", result, tt.expected)
 			}
@@ -1174,6 +1175,54 @@ func TestInferTypeWithImprovedConstraints(t *testing.T) {
 				t.Errorf("InferType() = %v, want %v", gotType, tt.wantType)
 			}
 		})
+	}
+}
+
+func TestInferTypeWithRecursiveGenericTypes(t *testing.T) {
+	// Tree<T> = { value: T, left: Tree<T>, right: Tree<T> }
+	env := TypeEnv{
+		"Tree": &GenericType{
+			Name:       "Tree",
+			TypeParams: []Type{&TypeVariable{Name: "T"}},
+			Fields: map[string]Type{
+				"value": &TypeVariable{Name: "T"},
+				"left":  &GenericType{Name: "Tree", TypeParams: []Type{&TypeVariable{Name: "T"}}},
+				"right": &GenericType{Name: "Tree", TypeParams: []Type{&TypeVariable{Name: "T"}}},
+			},
+		},
+		"int": &TypeConstant{Name: "int"},
+	}
+
+	// Tree<int>[int]
+	expr := &ast.IndexExpr{
+		X:     &ast.Ident{Name: "Tree"},
+		Index: &ast.Ident{Name: "int"},
+	}
+
+	result, err := InferType(expr, env)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Tree<int> = { value: int, left: Tree<int>, right: Tree<int> }
+	expected := &GenericType{
+		Name:       "Tree",
+		TypeParams: []Type{&TypeConstant{Name: "int"}},
+		Fields: map[string]Type{
+			"value": &TypeConstant{Name: "int"},
+			"left": &GenericType{
+				Name:       "Tree",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+			},
+			"right": &GenericType{
+				Name:       "Tree",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+			},
+		},
+	}
+
+	if !TypesEqual(result, expected) {
+		t.Errorf("Expected %v, but got %v", expected, result)
 	}
 }
 

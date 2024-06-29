@@ -413,15 +413,22 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 		Fields:     genericType.Fields, // create new map takes more time than just copying the reference. about 2x slower
 	}
 
+	visitor := NewTypeVisitor()
 	// substitute type parameters in the fields
 	for name, typ := range genericType.Fields {
-		inferredType.Fields[name] = substituteTypeParams(typ, genericType.TypeParams, typeParams)
+		inferredType.Fields[name] = substituteTypeParams(typ, genericType.TypeParams, typeParams, visitor)
 	}
 
 	return inferredType, nil
 }
 
-func substituteTypeParams(t Type, from, to []Type) Type {
+// substituteTypeParams substitutes type parameters in a type with concrete types.
+// It uses a TypeVisitor to detect and handle circular references in the type structure.
+func substituteTypeParams(t Type, from, to []Type, visitor *TypeVisitor) Type {
+	// circular reference check
+	if visitor.Visit(t) {
+		return t
+	}
 	switch t := t.(type) {
 	case *TypeVariable:
 		for i, param := range from {
@@ -432,11 +439,11 @@ func substituteTypeParams(t Type, from, to []Type) Type {
 	case *GenericType:
 		newParams := make([]Type, len(t.TypeParams))
 		for i, param := range t.TypeParams {
-			newParams[i] = substituteTypeParams(param, from, to)
+			newParams[i] = substituteTypeParams(param, from, to, visitor)
 		}
 		newFld := make(map[string]Type)
 		for name, typ := range t.Fields {
-			newFld[name] = substituteTypeParams(typ, from, to)
+			newFld[name] = substituteTypeParams(typ, from, to, visitor)
 		}
 		return &GenericType{
 			Name:       t.Name,
@@ -445,19 +452,19 @@ func substituteTypeParams(t Type, from, to []Type) Type {
 		}
 	case *SliceType:
 		return &SliceType{
-			ElementType: substituteTypeParams(t.ElementType, from, to),
+			ElementType: substituteTypeParams(t.ElementType, from, to, visitor),
 		}
 	case *MapType:
 		return &MapType{
-			KeyType:   substituteTypeParams(t.KeyType, from, to),
-			ValueType: substituteTypeParams(t.ValueType, from, to),
+			KeyType:   substituteTypeParams(t.KeyType, from, to, visitor),
+			ValueType: substituteTypeParams(t.ValueType, from, to, visitor),
 		}
 	case *FunctionType:
 		newParams := make([]Type, len(t.ParamTypes))
 		for i, param := range t.ParamTypes {
-			newParams[i] = substituteTypeParams(param, from, to)
+			newParams[i] = substituteTypeParams(param, from, to, visitor)
 		}
-		newReturn := substituteTypeParams(t.ReturnType, from, to)
+		newReturn := substituteTypeParams(t.ReturnType, from, to, visitor)
 		return &FunctionType{
 			ParamTypes: newParams,
 			ReturnType: newReturn,

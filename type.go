@@ -157,32 +157,32 @@ type TypeConstraint struct {
 }
 
 func (tc *TypeConstraint) String() string {
-    var separator string
-    if tc.Union {
-        separator = " | "
-    } else {
-        separator = ", "
-    }
+	var separator string
+	if tc.Union {
+		separator = " | "
+	} else {
+		separator = ", "
+	}
 
-    var interfaces []string
-    for _, iface := range tc.Interfaces {
-        interfaces = append(interfaces, iface.Name)
-    }
+	var interfaces []string
+	for _, iface := range tc.Interfaces {
+		interfaces = append(interfaces, iface.Name)
+	}
 
-    var types []string
-    for _, t := range tc.Types {
-        types = append(types, t.String())
-    }
+	var types []string
+	for _, t := range tc.Types {
+		types = append(types, t.String())
+	}
 
-    interfacesStr := strings.Join(interfaces, separator)
-    typesStr := strings.Join(types, separator)
+	interfacesStr := strings.Join(interfaces, separator)
+	typesStr := strings.Join(types, separator)
 
-    if len(interfaces) > 0 {
-        if tc.Union {
-            return fmt.Sprintf("Union([%s], [%s])", interfacesStr, typesStr)
-        }
+	if len(interfaces) > 0 {
+		if tc.Union {
+			return fmt.Sprintf("Union([%s], [%s])", interfacesStr, typesStr)
+		}
 		return fmt.Sprintf("Constraint([%s], [%s])", interfacesStr, typesStr)
-    }
+	}
 	if tc.Union {
 		return fmt.Sprintf("Union([], [%s])", typesStr)
 	}
@@ -203,6 +203,25 @@ func (gt *GenericType) String() string {
 		params[i] = param.String()
 	}
 	return fmt.Sprintf("Generic(%s, %v)", gt.Name, params)
+}
+
+// TypeVisitor is a visitor that tracks visited types to prevent infinite recursion.
+type TypeVisitor struct {
+	visited map[string]bool
+}
+
+func NewTypeVisitor() *TypeVisitor {
+	return &TypeVisitor{visited: make(map[string]bool)}
+}
+
+// Visit marks the given type as visited and returns true if it has been visited before.
+func (v *TypeVisitor) Visit(t Type) bool {
+	key := fmt.Sprintf("%p", t)
+	if v.visited[key] {
+		return true
+	}
+	v.visited[key] = true
+	return false
 }
 
 // TypeEnv store and manage type variables and their types.

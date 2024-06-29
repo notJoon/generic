@@ -32,6 +32,10 @@ func TestStringMethods(t *testing.T) {
 		Interfaces: []Interface{{Name: "Stringer"}},
 		Types:      []Type{&TypeConstant{Name: "int"}},
 	}
+	union := &TypeConstraint{
+		Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}},
+		Union: true,
+	}
 	gt := &GenericType{
 		Name:       "Stack",
 		TypeParams: []Type{&TypeVariable{Name: "T"}},
@@ -59,6 +63,7 @@ func TestStringMethods(t *testing.T) {
 		{at, "Arr[10]TypeVar(T)"},
 		{mt, "Map[TypeConst(string)]TypeConst(int)"},
 		{tcst, "Constraint([Stringer], [TypeConst(int)])"},
+		{union, "Union([], [TypeConst(int) | TypeConst(string)])"},
 		{gt, "Generic(Stack, [TypeVar(T)])"},
 		{ta, "TypeAlias(RuneReader = InterfaceType(io.RuneReader))"},
 	}

@@ -153,20 +153,40 @@ func (mt *MapType) String() string {
 type TypeConstraint struct {
 	Interfaces []Interface
 	Types      []Type
+	Union      bool // true if this is a union constraint (T1 | T2 | ...)
 }
 
 func (tc *TypeConstraint) String() string {
-	var interfaces []string
-	for _, iface := range tc.Interfaces {
-		interfaces = append(interfaces, iface.Name)
-	}
+    var separator string
+    if tc.Union {
+        separator = " | "
+    } else {
+        separator = ", "
+    }
 
-	var types []string
-	for _, t := range tc.Types {
-		types = append(types, t.String())
-	}
+    var interfaces []string
+    for _, iface := range tc.Interfaces {
+        interfaces = append(interfaces, iface.Name)
+    }
 
-	return fmt.Sprintf("Constraint([%s], [%s])", strings.Join(interfaces, ", "), strings.Join(types, ", "))
+    var types []string
+    for _, t := range tc.Types {
+        types = append(types, t.String())
+    }
+
+    interfacesStr := strings.Join(interfaces, separator)
+    typesStr := strings.Join(types, separator)
+
+    if len(interfaces) > 0 {
+        if tc.Union {
+            return fmt.Sprintf("Union([%s], [%s])", interfacesStr, typesStr)
+        }
+		return fmt.Sprintf("Constraint([%s], [%s])", interfacesStr, typesStr)
+    }
+	if tc.Union {
+		return fmt.Sprintf("Union([], [%s])", typesStr)
+	}
+	return fmt.Sprintf("Constraint([], [%s])", typesStr)
 }
 
 // GenericType represents a generic type with type parameters.

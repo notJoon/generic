@@ -1062,6 +1062,121 @@ func TestSubstituteTypeParams(t *testing.T) {
 	}
 }
 
+func TestInferTypeWithImprovedConstraints(t *testing.T) {
+	env := TypeEnv{
+		// Numeric<T> where T: int | float64
+		"Numeric": &GenericType{
+			Name:       "Numeric",
+			TypeParams: []Type{&TypeVariable{Name: "T"}},
+			Constraints: map[string]TypeConstraint{
+				"T": {
+					Types: []Type{
+						&TypeConstant{Name: "int"},
+						&TypeConstant{Name: "float64"},
+					},
+					Union: true,
+				},
+			},
+		},
+		// Printable interface
+		"Printable": &Interface{
+			Name: "Printable",
+			Methods: MethodSet{
+				"String": Method{Name: "String", Params: []Type{}, Results: []Type{&TypeConstant{Name: "string"}}},
+			},
+		},
+		// Complex<T> where T: Printable & (int | float64)
+		"Complex": &GenericType{
+			Name:       "Complex",
+			TypeParams: []Type{&TypeVariable{Name: "T"}},
+			Constraints: map[string]TypeConstraint{
+				"T": {
+					Interfaces: []Interface{{Name: "Printable"}},
+					Types: []Type{
+						&TypeConstant{Name: "int"},
+						&TypeConstant{Name: "float64"},
+					},
+				},
+			},
+		},
+		"int":     &TypeConstant{Name: "int"},
+		"float64": &TypeConstant{Name: "float64"},
+		"string":  &TypeConstant{Name: "string"},
+	}
+
+	tests := []struct {
+		name     string
+		expr     ast.Expr
+		wantType Type
+		wantErr  bool
+	}{
+		{
+			name: "Numeric with int",
+			// Numeric<int>
+			expr: &ast.IndexExpr{
+				X:     &ast.Ident{Name: "Numeric"},
+				Index: &ast.Ident{Name: "int"},
+			},
+			// Numeric<int>
+			wantType: &GenericType{
+				Name:       "Numeric",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Numeric with float64",
+			// Numeric<float64>
+			expr: &ast.IndexExpr{
+				X:     &ast.Ident{Name: "Numeric"},
+				Index: &ast.Ident{Name: "float64"},
+			},
+			// Numeric<float64>
+			wantType: &GenericType{
+				Name:       "Numeric",
+				TypeParams: []Type{&TypeConstant{Name: "float64"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Numeric with string (should fail)",
+			expr: &ast.IndexExpr{
+				X:     &ast.Ident{Name: "Numeric"},
+				Index: &ast.Ident{Name: "string"},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+		{
+			name: "Complex with int",
+			// Complex<int>
+			expr: &ast.IndexExpr{
+				X:     &ast.Ident{Name: "Complex"},
+				Index: &ast.Ident{Name: "int"},
+			},
+			// Complex<int>
+			wantType: &GenericType{
+				Name:       "Complex",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := InferType(tt.expr, env)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InferType() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("InferType() = %v, want %v", gotType, tt.wantType)
+			}
+		})
+	}
+}
+
 func TestCalculateStructMethodSet(t *testing.T) {
 	tests := []struct {
 		name     string

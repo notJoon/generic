@@ -45,11 +45,16 @@ var (
 //	                             (zip funcType.ParamTypes c.Args)
 //	                  in funcType.ReturnType
 //	_ → error
-func InferType(expr ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
+func InferType(node interface{}, env TypeEnv, ctx *InferenceContext) (Type, error) {
 	if ctx == nil {
 		ctx = NewInferenceContext()
 	}
-	switch expr := expr.(type) {
+
+	// [2024.06.24 @notJoon] Since the `ast.AssignStmt` and `ast.ReturnStmt` are dynamically typed,
+	// we need to change the `InferType` function's parameter to `interface{}`.
+	//
+	// By applying this, we can handle the all types of the `ast.Expr` and `ast.Stmt`.
+	switch expr := node.(type) {
 	case *ast.Ident:
 		if typ, ok := env[expr.Name]; ok {
 			if alias, ok := typ.(*TypeAlias); ok {
@@ -58,6 +63,54 @@ func InferType(expr ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) 
 			return typ, nil
 		}
 		return nil, fmt.Errorf("unknown identifier: %s", expr.Name)
+	case *ast.AssignStmt:
+		for i, rhs := range expr.Rhs {
+			var expected Type
+			if i < len(expr.Lhs) {
+				expected, _ = InferType(expr.Lhs[i], env, ctx)
+			}
+			rhsCtx := NewInferenceContext(
+				WithExpectedType(ctx.ExpectedType),
+				WithAssignment(),
+			)
+			rhsType, err := InferType(rhs, env, rhsCtx)
+			if err != nil {
+				return nil, err
+			}
+
+			// check type compatibility
+			if expected != nil {
+				if err := Unify(expected, rhsType, env); err != nil {
+					return nil, fmt.Errorf("assignment type mismatch for %s: %v", expr.Lhs[i], err)
+				}
+			}
+		}
+		return nil, nil // assignment statement does not have a type
+	case *ast.ReturnStmt:
+		if ctx.ExpectedType == nil {
+			return nil, fmt.Errorf("return statement outside of function context")
+		}
+		funcType, ok := ctx.ExpectedType.(*FunctionType)
+		if !ok {
+			return nil, fmt.Errorf("expected function type in return context")
+		}
+		if len(expr.Results) != len(funcType.ReturnType.(*TupleType).Types) {
+			return nil, fmt.Errorf("expected %d return values, got %d", len(funcType.ReturnType.(*TupleType).Types), len(expr.Results))
+		}
+		for i, result := range expr.Results {
+			resultCtx := NewInferenceContext(
+				WithExpectedType(funcType.ReturnType.(*TupleType).Types[i]),
+				WithReturnValue(),
+			)
+			resultType, err := InferType(result, env, resultCtx)
+			if err != nil {
+				return nil, err
+			}
+			if err := Unify(funcType.ReturnType.(*TupleType).Types[i], resultType, env); err != nil {
+				return nil, fmt.Errorf("return type mismatch for %dth result: %v", i, err)
+			}
+		}
+		return nil, nil // return statement does not have a type
 	case *ast.CallExpr:
 		if selExpr, ok := expr.Fun.(*ast.SelectorExpr); ok {
 			// might be a method call
@@ -360,7 +413,7 @@ func InferType(expr ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) 
 		}
 
 		isVariadic := expr.Params.NumFields() > 0 && expr.Params.List[len(expr.Params.List)-1].Type.(*ast.Ellipsis) != nil
-		funcType:= &FunctionType{
+		funcType := &FunctionType{
 			ParamTypes: ptypes,
 			ReturnType: retType,
 			IsVariadic: isVariadic,
@@ -449,8 +502,10 @@ func InferType(expr ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) 
 			}
 		}
 		return iface, nil
+	default:
+		return nil, fmt.Errorf("unsupported node type: %T", node)
 	}
-	return nil, fmt.Errorf("unknown expression: %T", expr)
+	return nil, fmt.Errorf("unknown expression: %T", node)
 }
 
 // inferGenericType infers the type of a generic expression with its type parameters,
@@ -566,7 +621,7 @@ func inferGenericMethod(method GenericMethod, typeArgs []Type, args []ast.Expr, 
 
 	// Substitute type parameters in the result type
 	if len(substitutedMethod.Results) == 0 {
-		return &TypeConstant{ Name: "void" }, nil
+		return &TypeConstant{Name: "void"}, nil
 	}
 	resultType := substituteTypeParams(substitutedMethod.Results[0], method.TypeParams, typeArgs, NewTypeVisitor())
 
@@ -852,13 +907,13 @@ func inferMethodCall(method Method, args []ast.Expr, env TypeEnv, ctx *Inference
 		}
 	}
 	if len(method.Results) == 0 {
-		return &TypeConstant{ Name: "void" }, nil
+		return &TypeConstant{Name: "void"}, nil
 	}
 	return method.Results[0], nil
 }
 
 func inferFuncionCall(funcTyp Type, args []ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
-	ft, ok :=  funcTyp.(*FunctionType)
+	ft, ok := funcTyp.(*FunctionType)
 	if !ok {
 		return nil, ErrNotAFunction
 	}

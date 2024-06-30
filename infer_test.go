@@ -1166,7 +1166,6 @@ func TestInferTypeWithImprovedConstraints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
 			gotType, err := InferType(tt.expr, env, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("InferType() error = %v, wantErr %v", err, tt.wantErr)

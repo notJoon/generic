@@ -6,8 +6,8 @@ import (
 )
 
 type InferenceContext struct {
-	ExpectedType Type
-	IsAssignment bool
+	ExpectedType  Type
+	IsAssignment  bool
 	IsFunctionArg bool
 	IsReturnValue bool
 }

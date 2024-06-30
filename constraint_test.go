@@ -96,7 +96,8 @@ func TestInferTypeWithConstraints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := InferType(tt.expr, tt.env)
+			ctx := NewInferenceContext()
+			got, err := InferType(tt.expr, tt.env, ctx)
 			if err != tt.wantErr {
 				t.Errorf("InferType(%s) error = %v, wantErr %v", tt.name, err, tt.wantErr)
 				return

@@ -45,7 +45,10 @@ var (
 //	                             (zip funcType.ParamTypes c.Args)
 //	                  in funcType.ReturnType
 //	_ → error
-func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
+func InferType(expr ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
+	if ctx == nil {
+		ctx = NewInferenceContext()
+	}
 	switch expr := expr.(type) {
 	case *ast.Ident:
 		if typ, ok := env[expr.Name]; ok {
@@ -58,7 +61,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 	case *ast.CallExpr:
 		if selExpr, ok := expr.Fun.(*ast.SelectorExpr); ok {
 			// might be a method call
-			recvType, err := InferType(selExpr.X, env)
+			recvType, err := InferType(selExpr.X, env, ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -79,12 +82,12 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 			}
 
 			if found {
-				// it's generic method call
+				// 1. it's generic method call
 				if len(expr.Args) == 0 {
 					return nil, fmt.Errorf("generic method call requires type arguments")
 				}
 
-				// the first argument should be the type arguments
+				// 2. the first argument should be the type arguments
 				typeArgs, ok := expr.Args[0].(*ast.CompositeLit)
 				if !ok {
 					return nil, fmt.Errorf("expected type argument for generic method call")
@@ -92,58 +95,57 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 
 				var typeArgTypes []Type
 				for _, elt := range typeArgs.Elts {
-					typeArg, err := InferType(elt, env)
+					typeArg, err := InferType(elt, env, NewInferenceContext())
 					if err != nil {
 						return nil, err
 					}
 					typeArgTypes = append(typeArgTypes, typeArg)
 				}
-				return inferGenericMethod(genericMethod, typeArgTypes, expr.Args[1:], env)
+
+				var args []ast.Expr
+				args = append(args, expr.Args[1:]...)
+
+				return inferGenericMethod(genericMethod, typeArgTypes, args, env, ctx)
 			}
+
+			method, err := findMethod(recvType, mthdName)
+			if err != nil {
+				return nil, err
+			}
+
+			return inferMethodCall(method, expr.Args, env, ctx)
 		}
-		funcTyp, err := InferType(expr.Fun, env)
+
+		// regular function call
+		funcTyp, err := InferType(expr.Fun, env, ctx)
 		if err != nil {
 			return nil, err
 		}
-		funcTypeCast, ok := funcTyp.(*FunctionType)
-		if !ok {
-			return nil, ErrNotAFunction
-		}
-		if len(funcTypeCast.ParamTypes) != len(expr.Args) {
-			return nil, ErrArityMismatch
-		}
-		for i, arg := range expr.Args {
-			argType, err := InferType(arg, env)
-			if err != nil {
-				return nil, err
-			}
-			if err := Unify(funcTypeCast.ParamTypes[i], argType, env); err != nil {
-				return nil, err
-			}
-		}
-		return funcTypeCast.ReturnType, nil
+		return inferFuncionCall(funcTyp, expr.Args, env, ctx)
 	case *ast.IndexExpr:
-		return inferGenericType(expr.X, []ast.Expr{expr.Index}, env)
+		ctx := NewInferenceContext(WithExpectedType(ctx.ExpectedType))
+		return inferGenericType(expr.X, []ast.Expr{expr.Index}, env, ctx)
 	case *ast.IndexListExpr:
-		return inferGenericType(expr.X, expr.Indices, env)
+		ctx := NewInferenceContext(WithExpectedType(ctx.ExpectedType))
+		return inferGenericType(expr.X, expr.Indices, env, ctx)
 	case *ast.CompositeLit:
 		switch typeExpr := expr.Type.(type) {
 		case *ast.MapType:
-			kt, err := InferType(typeExpr.Key, env)
+			kt, err := InferType(typeExpr.Key, env, ctx)
 			if err != nil {
 				return nil, err
 			}
-			vt, err := InferType(typeExpr.Value, env)
+			vt, err := InferType(typeExpr.Value, env, ctx)
 			if err != nil {
 				return nil, err
 			}
 			for _, elt := range expr.Elts {
 				if kv, ok := elt.(*ast.KeyValueExpr); ok {
-					k, err := InferType(kv.Key, env)
+					k, err := InferType(kv.Key, env, ctx)
 					if err != nil {
 						return nil, err
 					}
-					v, err := InferType(kv.Value, env)
+					v, err := InferType(kv.Value, env, ctx)
 					if err != nil {
 						return nil, err
 					}
@@ -159,7 +161,9 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 		case *ast.ArrayType:
 			// handle slice literal
 			if typeExpr.Len == nil {
-				et, err := InferType(typeExpr.Elt, env)
+				// inference the element type
+				etCtx := NewInferenceContext(WithExpectedType(ctx.ExpectedType))
+				et, err := InferType(typeExpr.Elt, env, etCtx)
 				if err != nil {
 					return nil, err
 				}
@@ -169,8 +173,11 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 				}
 
 				// check the types of the remaining elements and ensure they are consistent
+				//
+				// create a new context when checking the element types
+				eltCtx := NewInferenceContext(WithExpectedType(et))
 				for _, elt := range expr.Elts {
-					eltType, err := InferType(elt, env)
+					eltType, err := InferType(elt, env, eltCtx)
 					if err != nil {
 						return nil, err
 					}
@@ -189,13 +196,17 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 			if err != nil {
 				return nil, fmt.Errorf("invalid array length: %v", err)
 			}
-			elemType, err := InferType(typeExpr.Elt, env)
+
+			etCtx := NewInferenceContext(WithExpectedType(ctx.ExpectedType))
+			elemType, err := InferType(typeExpr.Elt, env, etCtx)
 			if err != nil {
 				return nil, err
 			}
+
 			// check element types of the array literal
+			eltCtx := NewInferenceContext(WithExpectedType(elemType))
 			for _, elt := range expr.Elts {
-				et, err := InferType(elt, env)
+				et, err := InferType(elt, env, eltCtx)
 				if err != nil {
 					return nil, err
 				}
@@ -228,9 +239,12 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 					return nil, fmt.Errorf("unknown field: %s", fieldName)
 				}
 
+				// create a new context for the field
+				fieldCtx := NewInferenceContext(WithExpectedType(fieldType))
+
 				// nested struct
 				if nestedCompLit, ok := kv.Value.(*ast.CompositeLit); ok {
-					nestedType, err := InferType(nestedCompLit, env)
+					nestedType, err := InferType(nestedCompLit, env, fieldCtx)
 					if err != nil {
 						return nil, err
 					}
@@ -239,7 +253,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 					}
 					newStruct.Fields[fieldName] = nestedType
 				} else {
-					fieldValue, err := InferType(kv.Value, env)
+					fieldValue, err := InferType(kv.Value, env, fieldCtx)
 					if err != nil {
 						return nil, err
 					}
@@ -260,7 +274,10 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 			if !ok {
 				return nil, fmt.Errorf("not a generic type: %v", genericType)
 			}
-			typeArg, err := InferType(typeExpr.Index, env)
+
+			// infer the type argument
+			taCtx := NewInferenceContext(WithExpectedType(ctx.ExpectedType))
+			typeArg, err := InferType(typeExpr.Index, env, taCtx)
 			if err != nil {
 				return nil, err
 			}
@@ -284,6 +301,9 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 				instantiatedType.Fields[fname] = instantiatedFieldType
 			}
 
+			// create a new context for the struct literal
+			structCtx := NewInferenceContext(WithExpectedType(instantiatedType))
+
 			// check struct literal's field values
 			for _, elt := range expr.Elts {
 				if kv, ok := elt.(*ast.KeyValueExpr); ok {
@@ -292,7 +312,7 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 					if !ok {
 						return nil, fmt.Errorf("unknown field %s in generic type %s", fname, gt.Name)
 					}
-					vt, err := InferType(kv.Value, env)
+					vt, err := InferType(kv.Value, env, structCtx)
 					if err != nil {
 						return nil, err
 					}
@@ -320,35 +340,64 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 			return nil, fmt.Errorf("unknown basic literal kind: %v", expr.Kind)
 		}
 	case *ast.StarExpr:
-		bt, err := InferType(expr.X, env)
+		btCtx := NewInferenceContext(WithExpectedType(ctx.ExpectedType))
+		bt, err := InferType(expr.X, env, btCtx)
 		if err != nil {
 			return nil, err
 		}
 		return &PointerType{Base: bt}, nil
 	case *ast.FuncType:
-		ptypes, err := inferParams(expr.Params, env)
+		paramCtx := NewInferenceContext(WithFunctionArg())
+		ptypes, err := inferParams(expr.Params, env, paramCtx)
 		if err != nil {
 			return nil, err
 		}
-		retType, err := inferResult(expr.Results, env)
+
+		retCtx := NewInferenceContext(WithReturnValue())
+		retType, err := inferResult(expr.Results, env, retCtx)
 		if err != nil {
 			return nil, err
 		}
+
 		isVariadic := expr.Params.NumFields() > 0 && expr.Params.List[len(expr.Params.List)-1].Type.(*ast.Ellipsis) != nil
-		return &FunctionType{
+		funcType:= &FunctionType{
 			ParamTypes: ptypes,
 			ReturnType: retType,
 			IsVariadic: isVariadic,
-		}, nil
+		}
+
+		// if ctx has expected type, check the function type compatibility
+		if ctx != nil && ctx.ExpectedType != nil {
+			if expected, ok := ctx.ExpectedType.(*FunctionType); ok {
+				if err := checkFunctionCompatibility(funcType, expected); err != nil {
+					return nil, fmt.Errorf("function type incompatible with expected type: %v", err)
+				}
+			}
+		}
+
+		return funcType, nil
 	case *ast.FuncLit:
-		return inferFunctionType(expr.Type, env)
+		funcCtx := NewInferenceContext()
+		if ctx != nil && ctx.ExpectedType != nil {
+			if ft, ok := ctx.ExpectedType.(*FunctionType); ok {
+				funcCtx.ExpectedType = ft
+			}
+		}
+		return inferFunctionType(expr.Type, env, funcCtx)
 	case *ast.Ellipsis:
+		var expectedElemType Type
+		if ctx != nil && ctx.ExpectedType != nil {
+			if sliceType, ok := ctx.ExpectedType.(*SliceType); ok {
+				expectedElemType = sliceType.ElementType
+			}
+		}
 		if expr.Elt == nil {
 			return &SliceType{
 				ElementType: &InterfaceType{Name: "interface{}", IsEmpty: true},
 			}, nil
 		}
-		elemType, err := InferType(expr.Elt, env)
+		elemCtx := NewInferenceContext(WithExpectedType(expectedElemType))
+		elemType, err := InferType(expr.Elt, env, elemCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -357,7 +406,8 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 		iface := &InterfaceType{Name: "", Methods: MethodSet{}, Embedded: []Type{}}
 		for _, field := range expr.Methods.List {
 			if len(field.Names) == 0 {
-				embeddedType, err := InferType(field.Type, env)
+				embeddedCtx := NewInferenceContext()
+				embeddedType, err := InferType(field.Type, env, embeddedCtx)
 				if err != nil {
 					return nil, err
 				}
@@ -369,12 +419,15 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 						return nil, fmt.Errorf("expected function type for method %s", name.Name)
 					}
 
-					params, err := inferParams(mt.Params, env)
+					paramCtx := NewInferenceContext(WithFunctionArg())
+					params, err := inferParams(mt.Params, env, paramCtx)
 					if err != nil {
 						return nil, fmt.Errorf("error inferring parameters for method %s: %v", name.Name, err)
 					}
 
-					results, err := inferParams(mt.Results, env)
+					// infer the method results
+					resultsCtx := NewInferenceContext(WithReturnValue())
+					results, err := inferParams(mt.Results, env, resultsCtx)
 					if err != nil {
 						return nil, fmt.Errorf("error inferring results for method %s: %v", name.Name, err)
 					}
@@ -384,6 +437,14 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 						Params:  params,
 						Results: results,
 					}
+				}
+			}
+		}
+		// if context contains expected type, need to check interface compatibility
+		if ctx != nil && ctx.ExpectedType != nil {
+			if expected, ok := ctx.ExpectedType.(*InterfaceType); ok {
+				if err := checkInterfaceCompatibility(iface, expected); err != nil {
+					return nil, fmt.Errorf("interface incompatible with expected type: %v", err)
 				}
 			}
 		}
@@ -421,8 +482,8 @@ func InferType(expr ast.Expr, env TypeEnv) (Type, error) {
 //	) indices in
 //	if length(typeParams) ≠ length(baseType.TypeParameters) then error else
 //	GenericType { Name: baseType.Name, TypeParameters: typeParams }
-func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error) {
-	baseType, err := InferType(x, env)
+func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
+	baseType, err := InferType(x, env, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -437,7 +498,8 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 
 	var typeParams []Type
 	for i, index := range indices {
-		paramType, err := InferType(index, env)
+		paramCtx := NewInferenceContext(WithExpectedType(genericType.TypeParams[i]))
+		paramType, err := InferType(index, env, paramCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -467,7 +529,7 @@ func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv) (Type, error)
 	return inferredType, nil
 }
 
-func inferGenericMethod(method GenericMethod, typeArgs []Type, args []ast.Expr, env TypeEnv) (Type, error) {
+func inferGenericMethod(method GenericMethod, typeArgs []Type, args []ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
 	if len(typeArgs) != len(method.TypeParams) {
 		return nil, fmt.Errorf("expected %d type arguments, got %d", len(method.TypeParams), len(typeArgs))
 	}
@@ -489,21 +551,32 @@ func inferGenericMethod(method GenericMethod, typeArgs []Type, args []ast.Expr, 
 		return nil, fmt.Errorf("expected %d arguments, got %d", len(substitutedMethod.Params), len(args))
 	}
 	for i, arg := range args {
-		argType, err := InferType(arg, env)
+		argContext := NewInferenceContext(
+			WithExpectedType(substitutedMethod.Params[i]),
+			WithFunctionArg(),
+		)
+		argType, err := InferType(arg, env, argContext)
 		if err != nil {
 			return nil, err
 		}
 		if err := Unify(substitutedMethod.Params[i], argType, newEnv); err != nil {
-			return nil, fmt.Errorf("argument type mismatch: %v", err)
+			return nil, fmt.Errorf("argument type mismatch for arg: %v", err)
 		}
 	}
 
 	// Substitute type parameters in the result type
 	if len(substitutedMethod.Results) == 0 {
-		return nil, fmt.Errorf("method has no return type")
+		return &TypeConstant{ Name: "void" }, nil
 	}
-	resultType := substitutedMethod.Results[0]
-	return substituteTypeParams(resultType, method.TypeParams, typeArgs, NewTypeVisitor()), nil
+	resultType := substituteTypeParams(substitutedMethod.Results[0], method.TypeParams, typeArgs, NewTypeVisitor())
+
+	if ctx != nil && ctx.ExpectedType != nil {
+		if err := Unify(resultType, ctx.ExpectedType, newEnv); err != nil {
+			return nil, fmt.Errorf("return type mismatch: %v", err)
+		}
+	}
+
+	return resultType, nil
 }
 
 // substituteTypeParams substitutes type parameters in a type with concrete types.
@@ -617,44 +690,79 @@ func calculateStructMethodSet(s *StructType, isPtr bool) MethodSet {
 	return ms
 }
 
-func inferFunctionType(ft *ast.FuncType, env TypeEnv) (Type, error) {
+func inferFunctionType(ft *ast.FuncType, env TypeEnv, ctx *InferenceContext) (Type, error) {
 	var (
 		paramTypes []Type
 		returnType Type
 	)
 
+	paramCtx := NewInferenceContext(WithFunctionArg())
 	if ft.Params != nil {
-		for _, fld := range ft.Params.List {
-			fldt, err := InferType(fld.Type, env)
+		for i, fld := range ft.Params.List {
+			var expectedParamType Type
+			if ctx != nil && ctx.ExpectedType != nil {
+				if expectedFt, ok := ctx.ExpectedType.(*FunctionType); ok && i < len(expectedFt.ParamTypes) {
+					expectedParamType = expectedFt.ParamTypes[i]
+				}
+			}
+			paramCtx.ExpectedType = expectedParamType
+			fldt, err := InferType(fld.Type, env, paramCtx)
 			if err != nil {
 				return nil, err
 			}
 			paramTypes = append(paramTypes, fldt)
 		}
 	}
+	returnCtx := NewInferenceContext(WithReturnValue())
 	if ft.Results != nil {
 		if len(ft.Results.List) == 1 {
+			if ctx != nil && ctx.ExpectedType != nil {
+				if expectedFt, ok := ctx.ExpectedType.(*FunctionType); ok {
+					returnCtx.ExpectedType = expectedFt.ReturnType
+				}
+			}
 			var err error
-			returnType, err = InferType(ft.Results.List[0].Type, env)
+			returnType, err = InferType(ft.Results.List[0].Type, env, returnCtx)
 			if err != nil {
 				return nil, err
 			}
 		} else if len(ft.Results.List) > 1 {
-			// handle multiple return values. like tuple type or anonymous struct type
-			panic("multiple return values not supported yet")
+			tupleTypes := make([]Type, len(ft.Results.List))
+			for i, result := range ft.Results.List {
+				resultType, err := InferType(result.Type, env, returnCtx)
+				if err != nil {
+					return nil, err
+				}
+				tupleTypes[i] = resultType
+			}
+			returnType = &TupleType{Types: tupleTypes}
 		}
 	}
-	return &FunctionType{ParamTypes: paramTypes, ReturnType: returnType}, nil
+	funcType := &FunctionType{
+		ParamTypes: paramTypes,
+		ReturnType: returnType,
+	}
+
+	// if context has expected type, check the function type compatibility
+	if ctx != nil && ctx.ExpectedType != nil {
+		if expectedFunc, ok := ctx.ExpectedType.(*FunctionType); ok {
+			if err := checkFunctionCompatibility(funcType, expectedFunc); err != nil {
+				return nil, fmt.Errorf("function type incompatible with expected type: %v", err)
+			}
+		}
+	}
+
+	return funcType, nil
 }
 
-func inferParams(fieldList *ast.FieldList, env TypeEnv) ([]Type, error) {
+func inferParams(fieldList *ast.FieldList, env TypeEnv, ctx *InferenceContext) ([]Type, error) {
 	if fieldList == nil {
 		return nil, nil
 	}
 
 	var params []Type
 	for _, field := range fieldList.List {
-		fieldType, err := InferType(field.Type, env)
+		fieldType, err := InferType(field.Type, env, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -670,20 +778,20 @@ func inferParams(fieldList *ast.FieldList, env TypeEnv) ([]Type, error) {
 	return params, nil
 }
 
-func inferResult(results *ast.FieldList, env TypeEnv) (Type, error) {
+func inferResult(results *ast.FieldList, env TypeEnv, ctx *InferenceContext) (Type, error) {
 	if results == nil || len(results.List) == 0 {
 		return &TypeConstant{Name: "void"}, nil
 	}
 
 	if len(results.List) == 1 && len(results.List[0].Names) == 0 {
 		// single return value
-		return InferType(results.List[0].Type, env)
+		return InferType(results.List[0].Type, env, ctx)
 	}
 
 	// multiple return values. like tuple type or anonymous struct type
 	var tt []Type
 	for _, fld := range results.List {
-		fldType, err := InferType(fld.Type, env)
+		fldType, err := InferType(fld.Type, env, ctx)
 		if err != nil {
 			if strings.HasPrefix(err.Error(), "unknown identifier") {
 				return nil, fmt.Errorf("unknown type: %s", strings.TrimPrefix(err.Error(), "unknown identifier: "))
@@ -698,75 +806,122 @@ func inferResult(results *ast.FieldList, env TypeEnv) (Type, error) {
 			}
 		}
 	}
-	return &TupleType{Types: tt}, nil
+	tupleType := &TupleType{Types: tt}
+
+	// if context has expected type, check the tuple type compatibility
+	if ctx != nil && ctx.ExpectedType != nil {
+		if expected, ok := ctx.ExpectedType.(*TupleType); ok {
+			if err := checkTupleCompatibility(tupleType, expected); err != nil {
+				return nil, fmt.Errorf("tuple type incompatible with expected type: %v", err)
+			}
+		}
+	}
+
+	return tupleType, nil
 }
 
-func inferTypeSpec(spec *ast.TypeSpec, env TypeEnv) (Type, error) {
-	// type alias
-	if spec.Assign.IsValid() {
-		aliased, err := InferType(spec.Type, env)
+func findMethod(recvType Type, methodName string) (Method, error) {
+	switch t := recvType.(type) {
+	case *StructType:
+		if method, ok := t.Methods[methodName]; ok {
+			return method, nil
+		}
+	case *InterfaceType:
+		if method, ok := t.Methods[methodName]; ok {
+			return method, nil
+		}
+	}
+	return Method{}, fmt.Errorf("method %s not found in type %v", methodName, recvType)
+}
+
+func inferMethodCall(method Method, args []ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
+	if len(args) != len(method.Params) {
+		return nil, fmt.Errorf("expected %d arguments, got %d", len(method.Params), len(args))
+	}
+	for i, arg := range args {
+		argContext := NewInferenceContext(
+			WithExpectedType(method.Params[i]),
+			WithFunctionArg(),
+		)
+		argType, err := InferType(arg, env, argContext)
 		if err != nil {
 			return nil, err
 		}
-		alias := &TypeAlias{
-			Name:      spec.Name.Name,
-			AliasedTo: aliased,
+		if err := Unify(method.Params[i], argType, env); err != nil {
+			return nil, fmt.Errorf("argument type mismatch for arg %d: %v", i, err)
 		}
-		env[spec.Name.Name] = alias // add the alias to the environment
-		return alias, nil
 	}
-
-	// normal type declaration
-	definedType, err := InferType(spec.Type, env)
-	if err != nil {
-		return nil, err
+	if len(method.Results) == 0 {
+		return &TypeConstant{ Name: "void" }, nil
 	}
-
-	// create a new type with the name and add it to the environment
-	switch t := definedType.(type) {
-	case *StructType:
-		newType := &StructType{
-			Name:    spec.Name.Name,
-			Fields:  t.Fields,
-			Methods: t.Methods,
-		}
-		env[spec.Name.Name] = newType
-		return newType, nil
-	case *InterfaceType:
-		newType := &InterfaceType{
-			Name:     spec.Name.Name,
-			Methods:  t.Methods,
-			Embedded: t.Embedded,
-		}
-		env[spec.Name.Name] = newType
-		return newType, nil
-	default:
-		env[spec.Name.Name] = definedType
-		return definedType, nil
-	}
+	return method.Results[0], nil
 }
 
-func InferPackageTypes(file *ast.File, env TypeEnv) (TypeEnv, error) {
-	for _, decl := range file.Decls {
-		genDecl, ok := decl.(*ast.GenDecl)
-		if !ok || genDecl.Tok != token.TYPE {
-			continue
+func inferFuncionCall(funcTyp Type, args []ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
+	ft, ok :=  funcTyp.(*FunctionType)
+	if !ok {
+		return nil, ErrNotAFunction
+	}
+	if len(args) != len(ft.ParamTypes) {
+		return nil, fmt.Errorf("expected %d arguments, got %d", len(ft.ParamTypes), len(args))
+	}
+	for i, arg := range args {
+		argContext := NewInferenceContext(
+			WithExpectedType(ft.ParamTypes[i]),
+			WithFunctionArg(),
+		)
+		argType, err := InferType(arg, env, argContext)
+		if err != nil {
+			return nil, err
 		}
-
-		for _, spec := range genDecl.Specs {
-			typeSpec, ok := spec.(*ast.TypeSpec)
-			if !ok {
-				continue
-			}
-
-			inferredType, err := inferTypeSpec(typeSpec, env)
-			if err != nil {
-				return nil, err
-			}
-
-			env[typeSpec.Name.Name] = inferredType
+		if err := Unify(ft.ParamTypes[i], argType, env); err != nil {
+			return nil, fmt.Errorf("argument type mismatch for arg %d: %v", i, err)
 		}
 	}
-
-	return env, nil
+	return ft.ReturnType, nil
 }
+
+// func inferTypeSpec(spec *ast.TypeSpec, env TypeEnv) (Type, error) {
+// 	// type alias
+// 	if spec.Assign.IsValid() {
+// 		aliased, err := InferType(spec.Type, env)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		alias := &TypeAlias{
+// 			Name:      spec.Name.Name,
+// 			AliasedTo: aliased,
+// 		}
+// 		env[spec.Name.Name] = alias // add the alias to the environment
+// 		return alias, nil
+// 	}
+
+// 	// normal type declaration
+// 	definedType, err := InferType(spec.Type, env)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	// create a new type with the name and add it to the environment
+// 	switch t := definedType.(type) {
+// 	case *StructType:
+// 		newType := &StructType{
+// 			Name:    spec.Name.Name,
+// 			Fields:  t.Fields,
+// 			Methods: t.Methods,
+// 		}
+// 		env[spec.Name.Name] = newType
+// 		return newType, nil
+// 	case *InterfaceType:
+// 		newType := &InterfaceType{
+// 			Name:     spec.Name.Name,
+// 			Methods:  t.Methods,
+// 			Embedded: t.Embedded,
+// 		}
+// 		env[spec.Name.Name] = newType
+// 		return newType, nil
+// 	default:
+// 		env[spec.Name.Name] = definedType
+// 		return definedType, nil
+// 	}
+// }

@@ -174,7 +174,7 @@ func InferType(node interface{}, env TypeEnv, ctx *InferenceContext) (Type, erro
 		if err != nil {
 			return nil, err
 		}
-		return inferFuncionCall(funcTyp, expr.Args, env, ctx)
+		return inferFunctionCall(funcTyp, expr.Args, env, ctx)
 	case *ast.IndexExpr:
 		// ctx := NewInferenceContext(WithExpectedType(ctx.ExpectedType))
 		// return inferGenericType(expr.X, []ast.Expr{expr.Index}, env, ctx)
@@ -842,7 +842,10 @@ func inferParams(fieldList *ast.FieldList, env TypeEnv, ctx *InferenceContext) (
 	for _, field := range fieldList.List {
 		fieldType, err := InferType(field.Type, env, ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error inferring parameter type: %v", err)
+		}
+		if fieldType == nil {
+			return nil, fmt.Errorf("unknown type for parameter")
 		}
 		// multiple names in a field. like (a, b int)
 		if len(field.Names) == 0 {
@@ -858,7 +861,7 @@ func inferParams(fieldList *ast.FieldList, env TypeEnv, ctx *InferenceContext) (
 
 func inferResult(results *ast.FieldList, env TypeEnv, ctx *InferenceContext) (Type, error) {
 	if results == nil || len(results.List) == 0 {
-		return &TypeConstant{Name: "void"}, nil
+		return nil, nil
 	}
 
 	if len(results.List) == 1 && len(results.List[0].Names) == 0 {
@@ -884,8 +887,12 @@ func inferResult(results *ast.FieldList, env TypeEnv, ctx *InferenceContext) (Ty
 			}
 		}
 	}
-	tupleType := &TupleType{Types: tt}
 
+	if len(tt) == 1 {
+		return tt[0], nil
+	}
+
+	tupleType := &TupleType{Types: tt}
 	// if context has expected type, check the tuple type compatibility
 	if ctx != nil && ctx.ExpectedType != nil {
 		if expected, ok := ctx.ExpectedType.(*TupleType); ok {
@@ -921,6 +928,12 @@ func inferMethodCall(method Method, args []ast.Expr, env TypeEnv, ctx *Inference
 			WithExpectedType(method.Params[i]),
 			WithFunctionArg(),
 		)
+		// copy the previous context into the new context
+		if ctx != nil {
+			argContext.IsAssignment = ctx.IsAssignment
+			argContext.IsReturnValue = ctx.IsReturnValue
+			argContext.IsFunctionArg = ctx.IsFunctionArg
+		}
 		argType, err := InferType(arg, env, argContext)
 		if err != nil {
 			return nil, err
@@ -932,10 +945,16 @@ func inferMethodCall(method Method, args []ast.Expr, env TypeEnv, ctx *Inference
 	if len(method.Results) == 0 {
 		return &TypeConstant{Name: "void"}, nil
 	}
-	return method.Results[0], nil
+	resultType := method.Results[0]
+	if ctx != nil && ctx.ExpectedType != nil {
+		if err := Unify(resultType, ctx.ExpectedType, env); err != nil {
+			return nil, fmt.Errorf("return type mismatch: %v", err)
+		}
+	}
+	return resultType, nil
 }
 
-func inferFuncionCall(funcTyp Type, args []ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
+func inferFunctionCall(funcTyp Type, args []ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
 	ft, ok := funcTyp.(*FunctionType)
 	if !ok {
 		return nil, ErrNotAFunction
@@ -948,12 +967,23 @@ func inferFuncionCall(funcTyp Type, args []ast.Expr, env TypeEnv, ctx *Inference
 			WithExpectedType(ft.ParamTypes[i]),
 			WithFunctionArg(),
 		)
+		if ctx != nil {
+			argContext.IsAssignment = ctx.IsAssignment
+			argContext.IsReturnValue = ctx.IsReturnValue
+			argContext.IsFunctionArg = ctx.IsFunctionArg
+		}
 		argType, err := InferType(arg, env, argContext)
 		if err != nil {
 			return nil, err
 		}
 		if err := Unify(ft.ParamTypes[i], argType, env); err != nil {
 			return nil, fmt.Errorf("argument type mismatch for arg %d: %v", i, err)
+		}
+	}
+	resultType := ft.ReturnType
+	if ctx != nil && ctx.ExpectedType != nil {
+		if err := Unify(resultType, ctx.ExpectedType, env); err != nil {
+			return nil, fmt.Errorf("return type mismatch: %v", err)
 		}
 	}
 	return ft.ReturnType, nil

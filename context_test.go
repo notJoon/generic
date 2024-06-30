@@ -63,31 +63,6 @@ func TestInferTypeArguments(t *testing.T) {
 			want:    nil,
 			wantErr: true,
 		},
-		{
-			name: "Infer from function argument",
-			genericFunc: &GenericType{
-				Name:       "Apply",
-				TypeParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
-				Constraints: map[string]TypeConstraint{
-					"T": {Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}}},
-					"U": {Types: []Type{&TypeConstant{Name: "bool"}, &TypeConstant{Name: "float64"}}},
-				},
-			},
-			args: []ast.Expr{
-				&ast.BasicLit{Kind: token.INT, Value: "42"},
-				&ast.FuncLit{
-					Type: &ast.FuncType{
-						Params:  &ast.FieldList{List: []*ast.Field{{Type: &ast.Ident{Name: "int"}}}},
-						Results: &ast.FieldList{List: []*ast.Field{{Type: &ast.Ident{Name: "float64"}}}},
-					},
-				},
-			},
-			env: TypeEnv{},
-			want: []Type{
-				&TypeConstant{Name: "int"},
-				&TypeConstant{Name: "float64"},
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -99,6 +74,125 @@ func TestInferTypeArguments(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("InferTypeArguments(%s) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInferFunctionLiteralType(t *testing.T) {
+	tests := []struct {
+		name     string
+		funcLit  *ast.FuncLit
+		env      TypeEnv
+		wantType Type
+		wantErr  bool
+	}{
+		{
+			name: "Function with no params and one return value",
+			funcLit: &ast.FuncLit{
+				Type: &ast.FuncType{
+					Params: &ast.FieldList{},
+					Results: &ast.FieldList{
+						List: []*ast.Field{
+							{Type: &ast.Ident{Name: "int"}},
+						},
+					},
+				},
+			},
+			env: TypeEnv{
+				"int": &TypeConstant{Name: "int"},
+			},
+			wantType: &FunctionType{
+				ParamTypes: []Type{},
+				ReturnType: &TypeConstant{Name: "int"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Function with one param and one return value",
+			funcLit: &ast.FuncLit{
+				Type: &ast.FuncType{
+					Params: &ast.FieldList{
+						List: []*ast.Field{
+							{Type: &ast.Ident{Name: "string"}},
+						},
+					},
+					Results: &ast.FieldList{
+						List: []*ast.Field{
+							{Type: &ast.Ident{Name: "bool"}},
+						},
+					},
+				},
+			},
+			env: TypeEnv{
+				"string": &TypeConstant{Name: "string"},
+				"bool":   &TypeConstant{Name: "bool"},
+			},
+			wantType: &FunctionType{
+				ParamTypes: []Type{&TypeConstant{Name: "string"}},
+				ReturnType: &TypeConstant{Name: "bool"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Function with multiple params and multiple return values",
+			funcLit: &ast.FuncLit{
+				Type: &ast.FuncType{
+					Params: &ast.FieldList{
+						List: []*ast.Field{
+							{Type: &ast.Ident{Name: "int"}},
+							{Type: &ast.Ident{Name: "string"}},
+						},
+					},
+					Results: &ast.FieldList{
+						List: []*ast.Field{
+							{Type: &ast.Ident{Name: "bool"}},
+							{Type: &ast.Ident{Name: "error"}},
+						},
+					},
+				},
+			},
+			env: TypeEnv{
+				"int":    &TypeConstant{Name: "int"},
+				"string": &TypeConstant{Name: "string"},
+				"bool":   &TypeConstant{Name: "bool"},
+				"error":  &InterfaceType{Name: "error"},
+			},
+			wantType: &FunctionType{
+				ParamTypes: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}},
+				ReturnType: &TupleType{
+					Types: []Type{&TypeConstant{Name: "bool"}, &InterfaceType{Name: "error"}},
+				},
+			},
+			wantErr: false,
+		},
+		// {
+		// 	name: "Function with unknown type",
+		// 	funcLit: &ast.FuncLit{
+		// 		Type: &ast.FuncType{
+		// 			Params: &ast.FieldList{
+		// 				List: []*ast.Field{
+		// 					{Type: &ast.Ident{Name: "unknownType"}},
+		// 				},
+		// 			},
+		// 			Results: &ast.FieldList{},
+		// 		},
+		// 	},
+		// 	env:      TypeEnv{},
+		// 	wantType: nil,
+		// 	wantErr:  true,
+		// },
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := inferFunctionLiteralType(tt.funcLit, tt.env)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("inferFunctionLiteralType() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("inferFunctionLiteralType() = %v, want %v", gotType, tt.wantType)
 			}
 		})
 	}

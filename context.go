@@ -97,7 +97,19 @@ func InferTypeArguments(genericFunc *GenericType, args []ast.Expr, env TypeEnv) 
 	for i, param := range genericFunc.TypeParams {
 		constraint := genericFunc.Constraints[param.(*TypeVariable).Name]
 		for _, arg := range args {
-			argType, err := InferType(arg, env, nil)
+			var (
+				argType Type
+				err error
+			)
+
+			// special handling for function literals
+			if funcLit, ok := arg.(*ast.FuncLit); ok {
+				// TODO: fix this function to handle function literals properly
+				argType, err = inferFunctionLiteralType(funcLit, env)
+			} else {
+				argType, err = InferType(arg, env, nil)
+			}
+
 			if err != nil {
 				return nil, err
 			}
@@ -111,4 +123,30 @@ func InferTypeArguments(genericFunc *GenericType, args []ast.Expr, env TypeEnv) 
 		}
 	}
 	return inferred, nil
+}
+
+// FIXME
+func inferFunctionLiteralType(funcLit *ast.FuncLit, env TypeEnv) (Type, error) {
+	ctx := NewInferenceContext(WithFunctionArg())
+
+	// infer the parameter types
+	pTypes, err := inferParams(funcLit.Type.Results, env, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error inferring parameter types: %v", err)
+	}
+
+	resultCtx := NewInferenceContext(WithReturnValue())
+	resultType, err := inferResult(funcLit.Type.Results, env, resultCtx)
+	if err != nil {
+		return nil, fmt.Errorf("error inferring return type: %v", err)
+	}
+
+	if typeConst, ok := resultType.(*TypeConstant); ok && typeConst.Name == "void" {
+		resultType = nil
+	}
+
+	return &FunctionType{
+		ParamTypes:  pTypes,
+		ReturnType:  resultType,
+	}, nil
 }

@@ -1325,37 +1325,6 @@ func TestInferTypeWithGenericMethods(t *testing.T) {
 			wantType: &TypeConstant{Name: "string"},
 			wantErr:  false,
 		},
-		// {
-		// 	// MyStruct.Map<int, string>(func(int) string)
-		// 	name: "Generic method with function parameter",
-		// 	expr: &ast.CallExpr{
-		// 		Fun: &ast.SelectorExpr{
-		// 			X:   &ast.Ident{Name: "MyStruct"},
-		// 			Sel: &ast.Ident{Name: "Map"},
-		// 		},
-		// 		Args: []ast.Expr{
-		// 			&ast.CompositeLit{
-		// 				Elts: []ast.Expr{&ast.Ident{Name: "int"}, &ast.Ident{Name: "string"}},
-		// 			},
-		// 			&ast.FuncLit{
-		// 				Type: &ast.FuncType{
-		// 					Params: &ast.FieldList{
-		// 						List: []*ast.Field{
-		// 							{Type: &ast.Ident{Name: "int"}},
-		// 						},
-		// 					},
-		// 					Results: &ast.FieldList{
-		// 						List: []*ast.Field{
-		// 							{Type: &ast.Ident{Name: "string"}},
-		// 						},
-		// 					},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// 	wantType: &SliceType{ElementType: &TypeConstant{Name: "string"}},
-		// 	wantErr:  false,
-		// },
 		{
 			name: "Generic method with incorrect type argument",
 			expr: &ast.CallExpr{
@@ -1943,7 +1912,7 @@ func TestInferResult(t *testing.T) {
 			name:     "No return value",
 			results:  &ast.FieldList{},
 			env:      TypeEnv{},
-			wantType: &TypeConstant{Name: "void"},
+			wantType: nil,
 			wantErr:  nil,
 		},
 		{
@@ -2157,6 +2126,159 @@ func TestInferTypeEllipsis(t *testing.T) {
 			}
 			if !TypesEqual(got, tt.wantType) {
 				t.Errorf("InferType() = %v, want %v", got, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferMethodCall(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     Method
+		args       []ast.Expr
+		env        TypeEnv
+		ctx        *InferenceContext
+		wantType   Type
+		wantErr    bool
+		errMessage string
+	}{
+		{
+			name: "Simple method call",
+			method: Method{
+				Name:    "TestMethod",
+				Params:  []Type{&TypeConstant{Name: "int"}},
+				Results: []Type{&TypeConstant{Name: "string"}},
+			},
+			args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:  NewInferenceContext(),
+			wantType: &TypeConstant{Name: "string"},
+			wantErr: false,
+		},
+		{
+			name: "Method call with incorrect argument type",
+			method: Method{
+				Name:    "TestMethod",
+				Params:  []Type{&TypeConstant{Name: "int"}},
+				Results: []Type{&TypeConstant{Name: "string"}},
+			},
+			args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"42"`}},
+			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:  NewInferenceContext(),
+			wantType: nil,
+			wantErr: true,
+			errMessage: "argument type mismatch for arg 0: type mismatch",
+		},
+		{
+			name: "Method call with expected return type",
+			method: Method{
+				Name:    "TestMethod",
+				Params:  []Type{&TypeConstant{Name: "int"}},
+				Results: []Type{&TypeConstant{Name: "string"}},
+			},
+			args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:  NewInferenceContext(WithExpectedType(&TypeConstant{Name: "string"})),
+			wantType: &TypeConstant{Name: "string"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := inferMethodCall(tt.method, tt.args, tt.env, tt.ctx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("inferMethodCall() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMessage != "" && err.Error() != tt.errMessage {
+				t.Errorf("inferMethodCall() error message = %v, want %v", err.Error(), tt.errMessage)
+				return
+			}
+			if !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("inferMethodCall() = %v, want %v", gotType, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferFunctionCall(t *testing.T) {
+	tests := []struct {
+		name       string
+		funcType   Type
+		args       []ast.Expr
+		env        TypeEnv
+		ctx        *InferenceContext
+		wantType   Type
+		wantErr    bool
+		errMessage string
+	}{
+		{
+			name: "Simple function call",
+			funcType: &FunctionType{
+				ParamTypes: []Type{&TypeConstant{Name: "int"}},
+				ReturnType: &TypeConstant{Name: "string"},
+			},
+			args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:  NewInferenceContext(),
+			wantType: &TypeConstant{Name: "string"},
+			wantErr: false,
+		},
+		{
+			name: "Function call with incorrect argument type",
+			funcType: &FunctionType{
+				ParamTypes: []Type{&TypeConstant{Name: "int"}},
+				ReturnType: &TypeConstant{Name: "string"},
+			},
+			args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"42"`}},
+			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:  NewInferenceContext(),
+			wantType: nil,
+			wantErr: true,
+			errMessage: "argument type mismatch for arg 0: type mismatch",
+		},
+		{
+			name: "Function call with expected return type",
+			funcType: &FunctionType{
+				ParamTypes: []Type{&TypeConstant{Name: "int"}},
+				ReturnType: &TypeConstant{Name: "string"},
+			},
+			args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:  NewInferenceContext(WithExpectedType(&TypeConstant{Name: "string"})),
+			wantType: &TypeConstant{Name: "string"},
+			wantErr: false,
+		},
+		{
+			name: "Function call with incorrect return type",
+			funcType: &FunctionType{
+				ParamTypes: []Type{&TypeConstant{Name: "int"}},
+				ReturnType: &TypeConstant{Name: "string"},
+			},
+			args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:  NewInferenceContext(WithExpectedType(&TypeConstant{Name: "int"})),
+			wantType: nil,
+			wantErr: true,
+			errMessage: "return type mismatch: type mismatch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := inferFunctionCall(tt.funcType, tt.args, tt.env, tt.ctx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("inferFunctionCall() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMessage != "" && err.Error() != tt.errMessage {
+				// t.Errorf("inferFunctionCall() error message. %s", diffStrings(err.Error(), tt.errMessage))
+				t.Errorf("infeerFunctionCall(%s) error message mismatch.\n%s", tt.name, diffStrings(err.Error(), tt.errMessage))
+				return
+			}
+			if !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("inferFunctionCall() = %v, want %v", gotType, tt.wantType)
 			}
 		})
 	}

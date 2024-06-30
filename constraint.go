@@ -28,15 +28,7 @@ func checkConstraint(t Type, constraint TypeConstraint) bool {
 				}
 			}
 		}
-	}
-	if constraint.Union {
-		// for union constraints, the type must match at least one of the constraint types
-		for _, allowedType := range constraint.Types {
-			if TypesEqual(t, allowedType) {
-				return true
-			}
-		}
-		return false
+		return checkConstraint(ptr.Base, constraint)
 	}
 	for _, iface := range constraint.Interfaces {
 		if !implInterface(t, iface) {
@@ -44,13 +36,26 @@ func checkConstraint(t Type, constraint TypeConstraint) bool {
 		}
 	}
 	if len(constraint.Types) > 0 {
-		for _, allowed := range constraint.Types {
-			if TypesEqual(t, allowed) {
-				return true
+		if constraint.Union {
+			// if union constraint, check if any of the types match
+			for _, allowedType := range constraint.Types {
+				if TypesEqual(t, allowedType) {
+					return true
+				}
 			}
+			return false
+		} else {
+			// Non-Union => all types must match
+			for _, allowedType := range constraint.Types {
+				if TypesEqual(t, allowedType) {
+					return true
+				}
+			}
+			return false
 		}
-		return false
 	}
+	// only interfaces are specified, and all are satisfied or
+	// no constraints are specified
 	return true
 }
 
@@ -58,8 +63,7 @@ func checkConstraint(t Type, constraint TypeConstraint) bool {
 func implInterface(t Type, iface Interface) bool {
 	switch concreteType := t.(type) {
 	case *TypeConstant:
-		// must handling for each primitive type for production level.
-		return true
+		return checkPrimitiveTypeInterface(concreteType.Name, iface)
 	case *GenericType:
 		// generic type may be different due to the type parameters
 		// but for simplicity, we assume it's the same
@@ -76,6 +80,24 @@ func implInterface(t Type, iface Interface) bool {
 	default:
 		return false
 	}
+}
+
+func checkPrimitiveTypeInterface(tName string, iface Interface) bool {
+	// define an interface to implement for each primitive type
+	primitiveInterfaces := map[string][]string{
+		"int":     {"Stringer", "Printable", "Comparable"},
+		"string":  {"Printable", "Comparable"},
+		"float64": {"Stringer", "Printable", "Comparable"},
+	}
+
+	if interfaces, ok := primitiveInterfaces[tName]; ok {
+		for _, i := range interfaces {
+			if i == iface.Name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func interfaceContainsAll(t *InterfaceType, iface Interface) bool {

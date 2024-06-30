@@ -691,7 +691,7 @@ func TestInferType(t *testing.T) {
 				"string": &TypeConstant{Name: "string"},
 			},
 			wantType: nil,
-			wantErr:  fmt.Errorf("type argument TypeConst(string) does not satisfy constraint for T"),
+			wantErr:  fmt.Errorf("type argument TypeConst(string) does not satisfy constraint T"),
 		},
 		{
 			name: "Infer type of non-generic type as generic",

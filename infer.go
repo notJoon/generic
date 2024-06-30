@@ -176,8 +176,31 @@ func InferType(node interface{}, env TypeEnv, ctx *InferenceContext) (Type, erro
 		}
 		return inferFuncionCall(funcTyp, expr.Args, env, ctx)
 	case *ast.IndexExpr:
-		ctx := NewInferenceContext(WithExpectedType(ctx.ExpectedType))
-		return inferGenericType(expr.X, []ast.Expr{expr.Index}, env, ctx)
+		// ctx := NewInferenceContext(WithExpectedType(ctx.ExpectedType))
+		// return inferGenericType(expr.X, []ast.Expr{expr.Index}, env, ctx)
+		baseType, err := InferType(expr.X, env, ctx)
+		if err != nil {
+			return nil, err
+		}
+		genericType, ok := baseType.(*GenericType)
+		if !ok {
+			return nil, ErrNotAGenericType
+		}
+		typeArg, err := InferType(expr.Index, env, ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		for paramName, constraint := range genericType.Constraints {
+			if !checkConstraint(typeArg, constraint) {
+				return nil, fmt.Errorf("type argument %v does not satisfy constraint %v", typeArg, paramName)
+			}
+		}
+
+		return &GenericType{
+			Name:       genericType.Name,
+			TypeParams: []Type{typeArg},
+		}, nil
 	case *ast.IndexListExpr:
 		ctx := NewInferenceContext(WithExpectedType(ctx.ExpectedType))
 		return inferGenericType(expr.X, expr.Indices, env, ctx)

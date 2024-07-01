@@ -1780,126 +1780,6 @@ func diffStrings(a, b string) string {
 	return diff.String()
 }
 
-// func TestInferTypeSpec(t *testing.T) {
-// 	tests := []struct {
-// 		name     string
-// 		spec     *ast.TypeSpec
-// 		env      TypeEnv
-// 		wantType Type
-// 		wantErr  error
-// 	}{
-// 		{
-// 			name: "Simple type alias",
-// 			spec: &ast.TypeSpec{
-// 				Name:   &ast.Ident{Name: "MyInt"},
-// 				Assign: token.Pos(1), // 1 is a valid non-zero position
-// 				Type:   &ast.Ident{Name: "int"},
-// 			},
-// 			env: TypeEnv{"int": &TypeConstant{Name: "int"}},
-// 			wantType: &TypeAlias{
-// 				Name:      "MyInt",
-// 				AliasedTo: &TypeConstant{Name: "int"},
-// 			},
-// 			wantErr: nil,
-// 		},
-// 		{
-// 			name: "Type alias to a custom type",
-// 			spec: &ast.TypeSpec{
-// 				Name:   &ast.Ident{Name: "MyCustomType"},
-// 				Assign: token.Pos(1),
-// 				Type:   &ast.Ident{Name: "CustomType"},
-// 			},
-// 			env: TypeEnv{"CustomType": &StructType{Name: "CustomType"}},
-// 			wantType: &TypeAlias{
-// 				Name:      "MyCustomType",
-// 				AliasedTo: &StructType{Name: "CustomType"},
-// 			},
-// 			wantErr: nil,
-// 		},
-// 		{
-// 			name: "Type alias to a generic type",
-// 			spec: &ast.TypeSpec{
-// 				Name:   &ast.Ident{Name: "MyVector"},
-// 				Assign: token.Pos(1),
-// 				Type: &ast.IndexExpr{
-// 					X:     &ast.Ident{Name: "Vector"},
-// 					Index: &ast.Ident{Name: "int"},
-// 				},
-// 			},
-// 			env: TypeEnv{
-// 				"Vector": &GenericType{
-// 					Name:       "Vector",
-// 					TypeParams: []Type{&TypeVariable{Name: "T"}},
-// 				},
-// 				"int": &TypeConstant{Name: "int"},
-// 			},
-// 			wantType: &TypeAlias{
-// 				Name: "MyVector",
-// 				AliasedTo: &GenericType{
-// 					Name:       "Vector",
-// 					TypeParams: []Type{&TypeConstant{Name: "int"}},
-// 				},
-// 			},
-// 			wantErr: nil,
-// 		},
-// 		{
-// 			name: "Type alias to an unknown type",
-// 			spec: &ast.TypeSpec{
-// 				Name:   &ast.Ident{Name: "MyUnknown"},
-// 				Assign: token.Pos(1),
-// 				Type:   &ast.Ident{Name: "UnknownType"},
-// 			},
-// 			env:      TypeEnv{},
-// 			wantType: nil,
-// 			wantErr:  fmt.Errorf("unknown identifier: UnknownType"),
-// 		},
-// 		{
-// 			name: "New interface type declaration",
-// 			spec: &ast.TypeSpec{
-// 				Name: &ast.Ident{Name: "MyInterface"},
-// 				Type: &ast.InterfaceType{
-// 					Methods: &ast.FieldList{
-// 						List: []*ast.Field{
-// 							{
-// 								Names: []*ast.Ident{{Name: "Method1"}},
-// 								Type: &ast.FuncType{
-// 									Params:  &ast.FieldList{},
-// 									Results: &ast.FieldList{List: []*ast.Field{{Type: &ast.Ident{Name: "int"}}}},
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			env: TypeEnv{"int": &TypeConstant{Name: "int"}},
-// 			wantType: &InterfaceType{
-// 				Name: "MyInterface",
-// 				Methods: MethodSet{
-// 					"Method1": Method{
-// 						Name:    "Method1",
-// 						Params:  []Type{},
-// 						Results: []Type{&TypeConstant{Name: "int"}},
-// 					},
-// 				},
-// 			},
-// 			wantErr: nil,
-// 		},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			got, err := inferTypeSpec(tt.spec, tt.env)
-// 			if err != nil && err.Error() != tt.wantErr.Error() {
-// 				t.Errorf("InferTypeSpec() error diff:\n%s", diffStrings(err.Error(), tt.wantErr.Error()))
-// 				return
-// 			}
-// 			if !TypesEqual(got, tt.wantType) {
-// 				t.Errorf("InferTypeSpec() = %v, want %v", got, tt.wantType)
-// 			}
-// 		})
-// 	}
-// }
-
 func TestInferResult(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2149,11 +2029,11 @@ func TestInferMethodCall(t *testing.T) {
 				Params:  []Type{&TypeConstant{Name: "int"}},
 				Results: []Type{&TypeConstant{Name: "string"}},
 			},
-			args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
-			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
-			ctx:  NewInferenceContext(),
+			args:     []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			env:      TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:      NewInferenceContext(),
 			wantType: &TypeConstant{Name: "string"},
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
 			name: "Method call with incorrect argument type",
@@ -2162,11 +2042,11 @@ func TestInferMethodCall(t *testing.T) {
 				Params:  []Type{&TypeConstant{Name: "int"}},
 				Results: []Type{&TypeConstant{Name: "string"}},
 			},
-			args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"42"`}},
-			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
-			ctx:  NewInferenceContext(),
-			wantType: nil,
-			wantErr: true,
+			args:       []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"42"`}},
+			env:        TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:        NewInferenceContext(),
+			wantType:   nil,
+			wantErr:    true,
 			errMessage: "argument type mismatch for arg 0: type mismatch",
 		},
 		{
@@ -2176,11 +2056,11 @@ func TestInferMethodCall(t *testing.T) {
 				Params:  []Type{&TypeConstant{Name: "int"}},
 				Results: []Type{&TypeConstant{Name: "string"}},
 			},
-			args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
-			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
-			ctx:  NewInferenceContext(WithExpectedType(&TypeConstant{Name: "string"})),
+			args:     []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			env:      TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:      NewInferenceContext(WithExpectedType(&TypeConstant{Name: "string"})),
 			wantType: &TypeConstant{Name: "string"},
-			wantErr: false,
+			wantErr:  false,
 		},
 	}
 
@@ -2219,11 +2099,11 @@ func TestInferFunctionCall(t *testing.T) {
 				ParamTypes: []Type{&TypeConstant{Name: "int"}},
 				ReturnType: &TypeConstant{Name: "string"},
 			},
-			args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
-			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
-			ctx:  NewInferenceContext(),
+			args:     []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			env:      TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:      NewInferenceContext(),
 			wantType: &TypeConstant{Name: "string"},
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
 			name: "Function call with incorrect argument type",
@@ -2231,11 +2111,11 @@ func TestInferFunctionCall(t *testing.T) {
 				ParamTypes: []Type{&TypeConstant{Name: "int"}},
 				ReturnType: &TypeConstant{Name: "string"},
 			},
-			args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"42"`}},
-			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
-			ctx:  NewInferenceContext(),
-			wantType: nil,
-			wantErr: true,
+			args:       []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"42"`}},
+			env:        TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:        NewInferenceContext(),
+			wantType:   nil,
+			wantErr:    true,
 			errMessage: "argument type mismatch for arg 0: type mismatch",
 		},
 		{
@@ -2244,11 +2124,11 @@ func TestInferFunctionCall(t *testing.T) {
 				ParamTypes: []Type{&TypeConstant{Name: "int"}},
 				ReturnType: &TypeConstant{Name: "string"},
 			},
-			args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
-			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
-			ctx:  NewInferenceContext(WithExpectedType(&TypeConstant{Name: "string"})),
+			args:     []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			env:      TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:      NewInferenceContext(WithExpectedType(&TypeConstant{Name: "string"})),
 			wantType: &TypeConstant{Name: "string"},
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
 			name: "Function call with incorrect return type",
@@ -2256,11 +2136,11 @@ func TestInferFunctionCall(t *testing.T) {
 				ParamTypes: []Type{&TypeConstant{Name: "int"}},
 				ReturnType: &TypeConstant{Name: "string"},
 			},
-			args: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
-			env:  TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
-			ctx:  NewInferenceContext(WithExpectedType(&TypeConstant{Name: "int"})),
-			wantType: nil,
-			wantErr: true,
+			args:       []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			env:        TypeEnv{"int": &TypeConstant{Name: "int"}, "string": &TypeConstant{Name: "string"}},
+			ctx:        NewInferenceContext(WithExpectedType(&TypeConstant{Name: "int"})),
+			wantType:   nil,
+			wantErr:    true,
 			errMessage: "return type mismatch: type mismatch",
 		},
 	}

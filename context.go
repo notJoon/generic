@@ -2,7 +2,6 @@ package generic
 
 import (
 	"fmt"
-	"go/ast"
 )
 
 type InferenceContext struct {
@@ -89,64 +88,4 @@ func checkTupleCompatibility(tuple1, tuple2 *TupleType) error {
 		}
 	}
 	return nil
-}
-
-// InferTypeArguments infers the type arguments for a generic function based on the provided arguments.
-func InferTypeArguments(genericFunc *GenericType, args []ast.Expr, env TypeEnv) ([]Type, error) {
-	inferred := make([]Type, len(genericFunc.TypeParams))
-	for i, param := range genericFunc.TypeParams {
-		constraint := genericFunc.Constraints[param.(*TypeVariable).Name]
-		for _, arg := range args {
-			var (
-				argType Type
-				err error
-			)
-
-			// special handling for function literals
-			if funcLit, ok := arg.(*ast.FuncLit); ok {
-				// TODO: fix this function to handle function literals properly
-				argType, err = inferFunctionLiteralType(funcLit, env)
-			} else {
-				argType, err = InferType(arg, env, nil)
-			}
-
-			if err != nil {
-				return nil, err
-			}
-			if checkConstraint(argType, constraint) {
-				inferred[i] = argType
-				break
-			}
-		}
-		if inferred[i] == nil {
-			return nil, fmt.Errorf("could not infer type for parameter %s", param)
-		}
-	}
-	return inferred, nil
-}
-
-// FIXME
-func inferFunctionLiteralType(funcLit *ast.FuncLit, env TypeEnv) (Type, error) {
-	ctx := NewInferenceContext(WithFunctionArg())
-
-	// infer the parameter types
-	pTypes, err := inferParams(funcLit.Type.Results, env, ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error inferring parameter types: %v", err)
-	}
-
-	resultCtx := NewInferenceContext(WithReturnValue())
-	resultType, err := inferResult(funcLit.Type.Results, env, resultCtx)
-	if err != nil {
-		return nil, fmt.Errorf("error inferring return type: %v", err)
-	}
-
-	if typeConst, ok := resultType.(*TypeConstant); ok && typeConst.Name == "void" {
-		resultType = nil
-	}
-
-	return &FunctionType{
-		ParamTypes:  pTypes,
-		ReturnType:  resultType,
-	}, nil
 }

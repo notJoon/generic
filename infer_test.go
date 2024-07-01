@@ -1374,15 +1374,21 @@ func TestInferTypeWithGenericMethods(t *testing.T) {
 }
 
 func TestInstantiateGenericType(t *testing.T) {
+	env := TypeEnv{
+		"int":    &TypeConstant{Name: "int"},
+		"string": &TypeConstant{Name: "string"},
+	}
+
 	tests := []struct {
 		name     string
 		gt       *GenericType
-		typeArgs []Type
+		typeArgs []interface{}
+		env      TypeEnv
 		want     Type
 		wantErr  bool
 	}{
 		{
-			name: "Generic type with methods",
+			name: "Generic type with methods (Type arguments)",
 			gt: &GenericType{
 				Name:       "Box",
 				TypeParams: []Type{&TypeVariable{Name: "T"}},
@@ -1411,7 +1417,8 @@ func TestInstantiateGenericType(t *testing.T) {
 					},
 				},
 			},
-			typeArgs: []Type{&TypeConstant{Name: "int"}},
+			typeArgs: []interface{}{&TypeConstant{Name: "int"}},
+			env:      env,
 			want: &GenericType{
 				Name:       "Box",
 				TypeParams: []Type{&TypeConstant{Name: "int"}},
@@ -1433,11 +1440,82 @@ func TestInstantiateGenericType(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "Generic type with methods (AST arguments)",
+			gt: &GenericType{
+				Name:       "Box",
+				TypeParams: []Type{&TypeVariable{Name: "T"}},
+				Fields: map[string]Type{
+					"value": &TypeVariable{Name: "T"},
+				},
+				Methods: MethodSet{
+					"Get": Method{
+						Name:    "Get",
+						Params:  []Type{},
+						Results: []Type{&TypeVariable{Name: "T"}},
+					},
+					"Set": Method{
+						Name:    "Set",
+						Params:  []Type{&TypeVariable{Name: "T"}},
+						Results: []Type{},
+					},
+				},
+				Constraints: map[string]TypeConstraint{
+					"T": {
+						Types: []Type{
+							&TypeConstant{Name: "int"},
+							&TypeConstant{Name: "string"},
+						},
+						Union: true,
+					},
+				},
+			},
+			typeArgs: []interface{}{&ast.Ident{Name: "int"}},
+			env:      env,
+			want: &GenericType{
+				Name:       "Box",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+				Fields: map[string]Type{
+					"value": &TypeConstant{Name: "int"},
+				},
+				Methods: MethodSet{
+					"Get": Method{
+						Name:    "Get",
+						Params:  []Type{},
+						Results: []Type{&TypeConstant{Name: "int"}},
+					},
+					"Set": Method{
+						Name:    "Set",
+						Params:  []Type{&TypeConstant{Name: "int"}},
+						Results: []Type{},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Generic type with unsatisfied constraint",
+			gt: &GenericType{
+				Name:       "Box",
+				TypeParams: []Type{&TypeVariable{Name: "T"}},
+				Constraints: map[string]TypeConstraint{
+					"T": {
+						Types: []Type{
+							&TypeConstant{Name: "int"},
+						},
+					},
+				},
+			},
+			typeArgs: []interface{}{&TypeConstant{Name: "string"}},
+			env:      env,
+			want:     nil,
+			wantErr:  true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := InstantiateGenericType(tt.gt, tt.typeArgs)
+			got, err := InstantiateGenericType(tt.gt, tt.typeArgs, tt.env, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("InstantiateGenericType() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2110,6 +2188,223 @@ func TestInferFunctionCall(t *testing.T) {
 			}
 			if !TypesEqual(gotType, tt.wantType) {
 				t.Errorf("inferFunctionCall() = %v, want %v", gotType, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferTypeAssignment(t *testing.T) {
+	env := TypeEnv{
+		"x": &TypeConstant{Name: "int"},
+		"y": &TypeConstant{Name: "string"},
+		"z": &TypeVariable{Name: "T"},
+	}
+
+	tests := []struct {
+		name     string
+		stmt     *ast.AssignStmt
+		wantType Type
+		wantErr  bool
+	}{
+		{
+			name: "Simple assignment",
+			stmt: &ast.AssignStmt{
+				Lhs: []ast.Expr{&ast.Ident{Name: "x"}},
+				Rhs: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			},
+			wantType: nil, // assignments don't have a type
+			wantErr:  false,
+		},
+		{
+			name: "Multiple assignment",
+			stmt: &ast.AssignStmt{
+				Lhs: []ast.Expr{&ast.Ident{Name: "x"}, &ast.Ident{Name: "y"}},
+				Rhs: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}, &ast.BasicLit{Kind: token.STRING, Value: `"hello"`}},
+			},
+			wantType: nil,
+			wantErr:  false,
+		},
+		{
+			name: "Type mismatch assignment",
+			stmt: &ast.AssignStmt{
+				Lhs: []ast.Expr{&ast.Ident{Name: "x"}},
+				Rhs: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"42"`}},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+		{
+			name: "Assignment to type variable",
+			stmt: &ast.AssignStmt{
+				Lhs: []ast.Expr{&ast.Ident{Name: "z"}},
+				Rhs: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "42"}},
+			},
+			wantType: nil,
+			wantErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := InferType(tt.stmt, env, nil)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InferType() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("InferType() = %v, want %v", gotType, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferTypeReturn(t *testing.T) {
+	env := TypeEnv{
+		"x": &TypeConstant{Name: "int"},
+		"y": &TypeConstant{Name: "string"},
+	}
+
+	tests := []struct {
+		name     string
+		stmt     *ast.ReturnStmt
+		ctx      *InferenceContext
+		wantType Type
+		wantErr  bool
+	}{
+		{
+			name: "Single return value",
+			stmt: &ast.ReturnStmt{
+				Results: []ast.Expr{&ast.Ident{Name: "x"}},
+			},
+			ctx: NewInferenceContext(WithExpectedType(&FunctionType{
+				ReturnType: &TypeConstant{Name: "int"},
+			})),
+			wantType: nil,
+			wantErr:  false,
+		},
+		{
+			name: "Multiple return values",
+			stmt: &ast.ReturnStmt{
+				Results: []ast.Expr{&ast.Ident{Name: "x"}, &ast.Ident{Name: "y"}},
+			},
+			ctx: NewInferenceContext(WithExpectedType(&FunctionType{
+				ReturnType: &TupleType{
+					Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "string"}},
+				},
+			})),
+			wantType: nil,
+			wantErr:  false,
+		},
+		{
+			name: "Return type mismatch",
+			stmt: &ast.ReturnStmt{
+				Results: []ast.Expr{&ast.Ident{Name: "y"}},
+			},
+			ctx: NewInferenceContext(WithExpectedType(&FunctionType{
+				ReturnType: &TypeConstant{Name: "int"},
+			})),
+			wantType: nil,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := InferType(tt.stmt, env, tt.ctx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InferType() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("InferType() = %v, want %v", gotType, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestInferTypeGenericCompositeLit(t *testing.T) {
+	env := TypeEnv{
+		"Vector": &GenericType{
+			Name:       "Vector",
+			TypeParams: []Type{&TypeVariable{Name: "T"}},
+			Fields: map[string]Type{
+				"data": &SliceType{ElementType: &TypeVariable{Name: "T"}},
+			},
+		},
+		"int": &TypeConstant{Name: "int"},
+	}
+
+	tests := []struct {
+		name     string
+		expr     *ast.CompositeLit
+		wantType Type
+		wantErr  bool
+	}{
+		{
+			name: "Generic Vector of int",
+			expr: &ast.CompositeLit{
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "int"},
+				},
+				Elts: []ast.Expr{
+					&ast.KeyValueExpr{
+						Key: &ast.Ident{Name: "data"},
+						Value: &ast.CompositeLit{
+							Type: &ast.ArrayType{Elt: &ast.Ident{Name: "int"}},
+							Elts: []ast.Expr{
+								&ast.BasicLit{Kind: token.INT, Value: "1"},
+								&ast.BasicLit{Kind: token.INT, Value: "2"},
+								&ast.BasicLit{Kind: token.INT, Value: "3"},
+							},
+						},
+					},
+				},
+			},
+			wantType: &GenericType{
+				Name:       "Vector",
+				TypeParams: []Type{&TypeConstant{Name: "int"}},
+				Fields: map[string]Type{
+					"data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Generic Vector with type mismatch",
+			expr: &ast.CompositeLit{
+				Type: &ast.IndexExpr{
+					X:     &ast.Ident{Name: "Vector"},
+					Index: &ast.Ident{Name: "int"},
+				},
+				Elts: []ast.Expr{
+					&ast.KeyValueExpr{
+						Key: &ast.Ident{Name: "data"},
+						Value: &ast.CompositeLit{
+							Type: &ast.ArrayType{Elt: &ast.Ident{Name: "int"}},
+							Elts: []ast.Expr{
+								&ast.BasicLit{Kind: token.INT, Value: "1"},
+								&ast.BasicLit{Kind: token.STRING, Value: `"2"`}, // Type mismatch here
+								&ast.BasicLit{Kind: token.INT, Value: "3"},
+							},
+						},
+					},
+				},
+			},
+			wantType: nil,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, err := InferType(tt.expr, env, nil)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InferType() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !TypesEqual(gotType, tt.wantType) {
+				t.Errorf("InferType() = %v, want %v", gotType, tt.wantType)
 			}
 		})
 	}

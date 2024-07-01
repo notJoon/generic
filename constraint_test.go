@@ -1,112 +1,104 @@
 package generic
 
 import (
-	"go/ast"
 	"testing"
 )
 
-var (
-	// testing purpose
-	Printable = Interface{
-		Name: "Printable",
-		Methods: MethodSet{
-			"String": Method{
-				Name:      "String",
-				Params:    []Type{},
-				Results:   []Type{&TypeConstant{Name: "string"}},
-				IsPointer: false,
-			},
-		},
-	}
+func TestCheckConstraint(t *testing.T) {
+    tests := []struct {
+        name       string
+        t          Type
+        constraint TypeConstraint
+        want       bool
+    }{
+        {
+            name: "Type satisfies interface constraint",
+            t:    &StructType{Name: "MyStruct", Methods: MethodSet{"String": Method{Name: "String"}}},
+            constraint: TypeConstraint{
+                Interfaces: []Interface{{Name: "Stringer", Methods: MethodSet{"String": Method{Name: "String"}}}},
+            },
+            want: true,
+        },
+        {
+            name: "Type doesn't satisfy interface constraint",
+            t:    &StructType{Name: "MyStruct"},
+            constraint: TypeConstraint{
+                Interfaces: []Interface{{Name: "Stringer", Methods: MethodSet{"String": Method{Name: "String"}}}},
+            },
+            want: false,
+        },
+        {
+            name: "Type satisfies union type constraint",
+            t:    &TypeConstant{Name: "int"},
+            constraint: TypeConstraint{
+                Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "float64"}},
+                Union: true,
+            },
+            want: true,
+        },
+        {
+            name: "Type doesn't satisfy union type constraint",
+            t:    &TypeConstant{Name: "string"},
+            constraint: TypeConstraint{
+                Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "float64"}},
+                Union: true,
+            },
+            want: false,
+        },
+        {
+            name: "Type satisfies non-union type constraint",
+            t:    &TypeConstant{Name: "int"},
+            constraint: TypeConstraint{
+                Types: []Type{&TypeConstant{Name: "int"}},
+                Union: false,
+            },
+            want: true,
+        },
+        {
+            name: "Type doesn't satisfy non-union type constraint",
+            t:    &TypeConstant{Name: "float64"},
+            constraint: TypeConstraint{
+                Types: []Type{&TypeConstant{Name: "int"}},
+                Union: false,
+            },
+            want: false,
+        },
+        {
+            name: "Type satisfies underlying type constraint",
+            t:    &TypeAlias{Name: "MyInt", AliasedTo: &TypeConstant{Name: "int"}},
+            constraint: TypeConstraint{
+                Types:        []Type{&TypeConstant{Name: "int"}},
+                Union:        true,
+                IsUnderlying: true,
+            },
+            want: true,
+        },
+        {
+            name: "Pointer type satisfies constraint",
+            t:    &PointerType{Base: &TypeConstant{Name: "int"}},
+            constraint: TypeConstraint{
+                Types: []Type{&PointerType{Base: &TypeConstant{Name: "int"}}},
+                Union: true,
+            },
+            want: true,
+        },
+        {
+            name: "Type satisfies built-in constraint",
+            t:    &TypeConstant{Name: "int"},
+            constraint: TypeConstraint{
+                BuiltinConstraint: "comparable",
+            },
+            want: true,
+        },
+    }
 
-	Comparable = Interface{
-		Name: "Comparable",
-		Methods: MethodSet{
-			"Compare": Method{
-				Name:      "Compare",
-				Params:    []Type{&TypeVariable{Name: "T"}},
-				Results:   []Type{&TypeConstant{Name: "int"}},
-				IsPointer: false,
-			},
-		},
-	}
-
-	IntType    = &TypeConstant{Name: "int"}
-	StringType = &TypeConstant{Name: "string"}
-	FloatType  = &TypeConstant{Name: "float64"}
-)
-
-func TestInferTypeWithConstraints(t *testing.T) {
-	tests := []struct {
-		name     string
-		expr     ast.Expr
-		env      TypeEnv
-		wantType Type
-		wantErr  error
-	}{
-		{
-			name: "generic type with satisfied constraints",
-			expr: &ast.IndexExpr{
-				X:     &ast.Ident{Name: "xs"},
-				Index: &ast.Ident{Name: "i"},
-			},
-			env: TypeEnv{
-				"xs": &GenericType{
-					Name:       "xs",
-					TypeParams: []Type{&TypeVariable{Name: "T"}},
-					Constraints: map[string]TypeConstraint{
-						"T": {
-							Interfaces: []Interface{Comparable},
-						},
-					},
-				},
-				"i": IntType,
-			},
-			wantType: &GenericType{
-				Name:       "xs",
-				TypeParams: []Type{IntType},
-			},
-		},
-		{
-			name: "generic type with multiple constraints",
-			expr: &ast.IndexExpr{
-				X:     &ast.Ident{Name: "Advanced"},
-				Index: &ast.Ident{Name: "string"},
-			},
-			env: TypeEnv{
-				"Advanced": &GenericType{
-					Name:       "Advanced",
-					TypeParams: []Type{&TypeVariable{Name: "T"}},
-					Constraints: map[string]TypeConstraint{
-						"T": {
-							Interfaces: []Interface{Printable, Comparable},
-							Types:      []Type{StringType, FloatType},
-						},
-					},
-				},
-				"string": StringType,
-			},
-			wantType: &GenericType{
-				Name:       "Advanced",
-				TypeParams: []Type{StringType},
-			},
-			wantErr: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := NewInferenceContext()
-			got, err := InferType(tt.expr, tt.env, ctx)
-			if err != tt.wantErr {
-				t.Errorf("InferType(%s) error = %v, wantErr %v", tt.name, err, tt.wantErr)
-				return
-			}
-			if !TypesEqual(got, tt.wantType) {
-				t.Errorf("InferType(%s) = %v, want %v", tt.name, got, tt.wantType)
-			}
-		})
-	}
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            if got := checkConstraint(tt.t, tt.constraint); got != tt.want {
+                t.Errorf("checkConstraint() = %v, want %v", got, tt.want)
+            }
+        })
+    }
 }
 
 func TestImplInterface(t *testing.T) {

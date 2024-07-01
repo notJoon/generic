@@ -89,9 +89,9 @@ func implInterface(t Type, iface Interface) bool {
 func checkPrimitiveTypeInterface(tName string, iface Interface) bool {
 	// define an interface to implement for each primitive type
 	primitiveInterfaces := map[string][]string{
-		"int":     {"Stringer", "Printable", "Comparable"},
-		"string":  {"Printable", "Comparable"},
-		"float64": {"Stringer", "Printable", "Comparable"},
+		TypeInt:     {"Stringer", "Printable", "Comparable"},
+		TypeString:  {"Printable", "Comparable"},
+		TypeFloat64: {"Stringer", "Printable", "Comparable"},
 	}
 
 	if interfaces, ok := primitiveInterfaces[tName]; ok {
@@ -249,42 +249,36 @@ func MethodsEqual(m1, m2 Method) bool {
 	return true
 }
 
+// checkBuiltinConstraint checks if a the given type satisfies the specified built-in constraint.
 func checkBuiltinConstraint(t Type, constraint string) bool {
 	switch constraint {
-	case "any":
+	case ConstraintAny:
 		return true
-
-	case "comparable":
+	case ConstraintComparable:
 		return isComparable(t)
-
-	case "ordered":
+	case ConstraintOrdered:
 		return isOrdered(t)
-
-	case "complex":
+	case ConstraintComplex:
 		return isComplex(t)
-
-	case "float":
+	case ConstraintFloat:
 		return isFloat(t)
-
-	case "integer":
+	case ConstraintInteger:
 		return isInteger(t)
-
-	case "signed":
+	case ConstraintSigned:
 		return isSigned(t)
-
-	case "unsigned":
+	case ConstraintUnsigned:
 		return isUnsigned(t)
-
 	default:
 		return false
 	}
 }
 
+// isComparable determines if the given type is comparable.
 func isComparable(t Type) bool {
 	switch t := t.(type) {
 	case *TypeConstant:
 		// premitive types are comparable
-		return t.Name == "bool" || isNumeric(t) || t.Name == "string"
+		return t.Name == TypeBool || isNumeric(t) || t.Name == TypeString
 	case *PointerType:
 		return true // all pointer types are comparable
 	case *InterfaceType:
@@ -305,61 +299,82 @@ func isComparable(t Type) bool {
 	}
 }
 
+var (
+	signedIntegers = map[string]bool{
+		TypeInt: true, TypeInt8: true, TypeInt16: true, TypeInt32: true, TypeInt64: true,
+	}
+	unsignedIntegers = map[string]bool{
+		TypeUint: true, TypeUint8: true, TypeUint16: true, TypeUint32: true, TypeUint64: true, TypeUintptr: true,
+	}
+	floats = map[string]bool{
+		TypeFloat32: true, TypeFloat64: true,
+	}
+	complexes = map[string]bool{
+		TypeComplex64: true, TypeComplex128: true,
+	}
+	orderedTypes = map[string]bool{
+		TypeString: true,
+	}
+)
+
+// isOrdered checks if the given type is ordered (can be used with comparison operators)
+// (e.g., <, <=, >, >=)
 func isOrdered(t Type) bool {
 	if tc, ok := t.(*TypeConstant); ok {
-		return tc.Name == "int" || tc.Name == "int8" || tc.Name == "int16" ||
-			tc.Name == "int32" || tc.Name == "int64" || tc.Name == "uint" ||
-			tc.Name == "uint8" || tc.Name == "uint16" || tc.Name == "uint32" ||
-			tc.Name == "uint64" || tc.Name == "uintptr" || tc.Name == "float32" ||
-			tc.Name == "float64" || tc.Name == "string"
+		return signedIntegers[tc.Name] ||
+			unsignedIntegers[tc.Name] ||
+			floats[tc.Name] ||
+			orderedTypes[tc.Name]
 	}
 	return false
 }
 
+// isComplex checks if the given type is a complex number type.
 func isComplex(t Type) bool {
 	if tc, ok := t.(*TypeConstant); ok {
-		return tc.Name == "complex64" || tc.Name == "complex128"
+		return complexes[tc.Name]
 	}
 	return false
 }
 
+// isFloat checks if the given type is a floating-point number type.
 func isFloat(t Type) bool {
 	if tc, ok := t.(*TypeConstant); ok {
-		return tc.Name == "float32" || tc.Name == "float64"
+		return floats[tc.Name]
 	}
 	return false
 }
 
+// isInteger checks if the given type is an integer type.
 func isInteger(t Type) bool {
 	if tc, ok := t.(*TypeConstant); ok {
-		return tc.Name == "int" || tc.Name == "int8" || tc.Name == "int16" ||
-			tc.Name == "int32" || tc.Name == "int64" || tc.Name == "uint" ||
-			tc.Name == "uint8" || tc.Name == "uint16" || tc.Name == "uint32" ||
-			tc.Name == "uint64" || tc.Name == "uintptr"
+		return signedIntegers[tc.Name] || unsignedIntegers[tc.Name]
 	}
 	return false
 }
 
+// isSigned checks if the given type is a signed integer type.
 func isSigned(t Type) bool {
 	if tc, ok := t.(*TypeConstant); ok {
-		return tc.Name == "int" || tc.Name == "int8" || tc.Name == "int16" ||
-			tc.Name == "int32" || tc.Name == "int64"
+		return signedIntegers[tc.Name]
 	}
 	return false
 }
 
+// isUnsigned checks if the given type is an unsigned integer type.
 func isUnsigned(t Type) bool {
 	if tc, ok := t.(*TypeConstant); ok {
-		return tc.Name == "uint" || tc.Name == "uint8" || tc.Name == "uint16" ||
-			tc.Name == "uint32" || tc.Name == "uint64" || tc.Name == "uintptr"
+		return unsignedIntegers[tc.Name]
 	}
 	return false
 }
 
+// isNumeric checks if the given type is a numeric type.
 func isNumeric(t Type) bool {
 	return isInteger(t) || isFloat(t) || isComplex(t)
 }
 
+// isUnderlyingType checks if the given type has the specified underlying type.
 func isUnderlyingType(t Type, underlyingType Type) bool {
 	for {
 		if alias, ok := t.(*TypeAlias); ok {

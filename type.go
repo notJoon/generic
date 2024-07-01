@@ -5,6 +5,37 @@ import (
 	"strings"
 )
 
+const (
+	// Type constraints
+	ConstraintAny        = "any"
+	ConstraintComparable = "comparable"
+	ConstraintOrdered    = "ordered"
+	ConstraintComplex    = "complex"
+	ConstraintFloat      = "float"
+	ConstraintInteger    = "integer"
+	ConstraintSigned     = "signed"
+	ConstraintUnsigned   = "unsigned"
+
+	// Type names
+	TypeBool       = "bool"
+	TypeString     = "string"
+	TypeInt        = "int"
+	TypeInt8       = "int8"
+	TypeInt16      = "int16"
+	TypeInt32      = "int32"
+	TypeInt64      = "int64"
+	TypeUint       = "uint"
+	TypeUint8      = "uint8"
+	TypeUint16     = "uint16"
+	TypeUint32     = "uint32"
+	TypeUint64     = "uint64"
+	TypeUintptr    = "uintptr"
+	TypeFloat32    = "float32"
+	TypeFloat64    = "float64"
+	TypeComplex64  = "complex64"
+	TypeComplex128 = "complex128"
+)
+
 // TODO: print type more go-like
 
 // Type represents any type in the type system.

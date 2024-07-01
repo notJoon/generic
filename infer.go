@@ -94,22 +94,25 @@ func InferType(node interface{}, env TypeEnv, ctx *InferenceContext) (Type, erro
 		if !ok {
 			return nil, fmt.Errorf("expected function type in return context")
 		}
-		if len(expr.Results) != len(funcType.ReturnType.(*TupleType).Types) {
-			return nil, fmt.Errorf("expected %d return values, got %d", len(funcType.ReturnType.(*TupleType).Types), len(expr.Results))
+
+		var expectedType []Type
+		switch rt := funcType.ReturnType.(type) {
+		case *TupleType:
+			expectedType = rt.Types
+		default:
+			expectedType = []Type{funcType.ReturnType}
 		}
+
+		if len(expr.Results) != len(expectedType) {
+			return nil, fmt.Errorf("expected %d return values, got %d", len(expectedType), len(expr.Results))
+		}
+
 		for i, result := range expr.Results {
-			resultCtx := NewInferenceContext(
-				WithExpectedType(funcType.ReturnType.(*TupleType).Types[i]),
-				WithReturnValue(),
-			)
-			resultType, err := InferType(result, env, resultCtx)
-			if err != nil {
-				return nil, err
-			}
-			if err := Unify(funcType.ReturnType.(*TupleType).Types[i], resultType, env); err != nil {
-				return nil, fmt.Errorf("return type mismatch for %dth result: %v", i, err)
+			if err := checkReturnType(result, expectedType[i], env); err != nil {
+				return nil, fmt.Errorf("return type mismatch for result %d: %v", i, err)
 			}
 		}
+
 		return nil, nil // return statement does not have a type
 	case *ast.CallExpr:
 		if selExpr, ok := expr.Fun.(*ast.SelectorExpr); ok {
@@ -184,12 +187,12 @@ func InferType(node interface{}, env TypeEnv, ctx *InferenceContext) (Type, erro
 		if !ok {
 			return nil, ErrNotAGenericType
 		}
-		typeArg, err := InferType(expr.Index, env, ctx)
-		if err != nil {
-			return nil, err
-		}
 
-		return InstantiateGenericType(genericType, []Type{typeArg})
+		typeArgs := make([]interface{}, len(genericType.TypeParams))
+		for i := range genericType.TypeParams {
+			typeArgs[i] = expr.Index
+		}
+		return InstantiateGenericType(genericType, typeArgs, env, ctx)
 	case *ast.IndexListExpr:
 		baseType, err := InferType(expr.X, env, ctx)
 		if err != nil {
@@ -202,15 +205,11 @@ func InferType(node interface{}, env TypeEnv, ctx *InferenceContext) (Type, erro
 		if len(expr.Indices) != len(genericType.TypeParams) {
 			return nil, fmt.Errorf("expected %d type parameters, got %d", len(genericType.TypeParams), len(expr.Indices))
 		}
-		var typeArgs []Type
-		for _, arg := range expr.Indices {
-			typeArg, err := InferType(arg, env, ctx)
-			if err != nil {
-				return nil, err
-			}
-			typeArgs = append(typeArgs, typeArg)
+		typeArgs := make([]interface{}, len(expr.Indices))
+		for i, idx := range expr.Indices {
+			typeArgs[i] = idx
 		}
-		return InstantiateGenericType(genericType, typeArgs)
+		return InstantiateGenericType(genericType, typeArgs, env, ctx)
 	case *ast.CompositeLit:
 		switch typeExpr := expr.Type.(type) {
 		case *ast.MapType:
@@ -538,80 +537,16 @@ func InferType(node interface{}, env TypeEnv, ctx *InferenceContext) (Type, erro
 	return nil, fmt.Errorf("unknown expression: %T", node)
 }
 
-// inferGenericType infers the type of a generic expression with its type parameters,
-// including nested generic types.
-//
-// ## Process
-//
-// inferGenericType(x, indices, env) =
-//  1. baseType = InferType(x, env)
-//  2. if not isGenericType(baseType) then error
-//  3. typeParams = []
-//  4. for each index in indices:
-//     paramType = InferType(index, env)
-//     if isGenericType(paramType) then
-//     paramType = inferGenericType(paramType.Name, paramType.TypeParameters, env)
-//     append paramType to typeParams
-//  5. if len(typeParams) ≠ len(baseType.TypeParameters) then error
-//  6. return new GenericType with baseType.Name and typeParams
-//
-// λx.λindices.λenv.
-//
-//	let baseType = InferType(x, env) in
-//	if not isGenericType(baseType) then error else
-//	let typeParams = map (λindex.
-//	  let paramType = InferType(index, env) in
-//	  if isGenericType(paramType) then
-//	    inferGenericType(paramType.Name, paramType.TypeParameters, env)
-//	  else paramType
-//	) indices in
-//	if length(typeParams) ≠ length(baseType.TypeParameters) then error else
-//	GenericType { Name: baseType.Name, TypeParameters: typeParams }
-func inferGenericType(x ast.Expr, indices []ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
-	baseType, err := InferType(x, env, ctx)
+func checkReturnType(result ast.Expr, expectedType Type, env TypeEnv) error {
+	resultCtx := NewInferenceContext(
+		WithExpectedType(expectedType),
+		WithReturnValue(),
+	)
+	resultType, err := InferType(result, env, resultCtx)
 	if err != nil {
-		return nil, err
+		return nil
 	}
-	genericType, ok := baseType.(*GenericType)
-	if !ok {
-		return nil, ErrNotAGenericType
-	}
-
-	if len(indices) != len(genericType.TypeParams) {
-		return nil, fmt.Errorf("expected %d type parameters, got %d", len(genericType.TypeParams), len(indices))
-	}
-
-	var typeParams []Type
-	for i, index := range indices {
-		paramCtx := NewInferenceContext(WithExpectedType(genericType.TypeParams[i]))
-		paramType, err := InferType(index, env, paramCtx)
-		if err != nil {
-			return nil, err
-		}
-		if i < len(genericType.TypeParams) {
-			paramName := genericType.TypeParams[i].(*TypeVariable).Name
-			if cst, ok := genericType.Constraints[paramName]; ok {
-				if !checkConstraint(paramType, cst) {
-					return nil, fmt.Errorf("type argument %v does not satisfy constraint for %s", paramType, paramName)
-				}
-			}
-		}
-		typeParams = append(typeParams, paramType)
-	}
-
-	inferredType := &GenericType{
-		Name:       genericType.Name,
-		TypeParams: typeParams,
-		Fields:     genericType.Fields, // create new map takes more time than just copying the reference. about 2x slower
-	}
-
-	visitor := NewTypeVisitor()
-	// substitute type parameters in the fields
-	for name, typ := range genericType.Fields {
-		inferredType.Fields[name] = substituteTypeParams(typ, genericType.TypeParams, typeParams, visitor)
-	}
-
-	return inferredType, nil
+	return Unify(expectedType, resultType, env)
 }
 
 func inferGenericMethod(method GenericMethod, typeArgs []Type, args []ast.Expr, env TypeEnv, ctx *InferenceContext) (Type, error) {
@@ -996,37 +931,58 @@ func inferFunctionCall(funcTyp Type, args []ast.Expr, env TypeEnv, ctx *Inferenc
 	return ft.ReturnType, nil
 }
 
-func InstantiateGenericType(gt *GenericType, typeArgs []Type) (Type, error) {
+// InstantiateGenericType instantiates a generic type with the given type arguments.
+// It can handle both AST expressions and concrete Type instances as type arguments.
+func InstantiateGenericType(gt *GenericType, typeArgs []interface{}, env TypeEnv, ctx *InferenceContext) (Type, error) {
 	if len(gt.TypeParams) != len(typeArgs) {
-		return nil, fmt.Errorf("wrong number of type arguments: expected %d, got %d", len(gt.TypeParams), len(typeArgs))
+		return nil, fmt.Errorf("expected %d type arguments, got %d", len(gt.TypeParams), len(typeArgs))
 	}
 
-	for i, param := range gt.TypeParams {
-		if constraint, ok := gt.Constraints[param.(*TypeVariable).Name]; ok {
-			if !checkConstraint(typeArgs[i], constraint) {
-				return nil, fmt.Errorf("type argument %v does not satisfy constraint for %s", typeArgs[i], param.(*TypeVariable).Name)
+	resolvedTypeArgs := make([]Type, len(typeArgs))
+	for i, arg := range typeArgs {
+		var argType Type
+		var err error
+
+		switch a := arg.(type) {
+		case ast.Expr:
+			paramCtx := NewInferenceContext(WithExpectedType(gt.TypeParams[i]))
+			argType, err = InferType(a, env, paramCtx)
+		case Type:
+			argType = a
+		default:
+			return nil, fmt.Errorf("unsupported type argument: %v", arg)
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		if constraint, ok := gt.Constraints[gt.TypeParams[i].(*TypeVariable).Name]; ok {
+			if !checkConstraint(argType, constraint) {
+				return nil, fmt.Errorf("type argument %v does not satisfy constraint for %s", argType, gt.TypeParams[i].(*TypeVariable).Name)
 			}
 		}
+
+		resolvedTypeArgs[i] = argType
 	}
 
-	// type substitution
 	instantiated := &GenericType{
 		Name:       gt.Name,
-		TypeParams: typeArgs,
+		TypeParams: resolvedTypeArgs,
 		Fields:     make(map[string]Type),
 		Methods:    make(MethodSet),
 	}
 
 	visitor := NewTypeVisitor()
 	for name, fieldType := range gt.Fields {
-		instantiated.Fields[name] = substituteTypeParams(fieldType, gt.TypeParams, typeArgs, visitor)
+		instantiated.Fields[name] = substituteTypeParams(fieldType, gt.TypeParams, resolvedTypeArgs, visitor)
 	}
 
 	for name, method := range gt.Methods {
 		instantiatedMethod := Method{
 			Name:      method.Name,
-			Params:    substituteTypeParamsInSlice(method.Params, gt.TypeParams, typeArgs, visitor),
-			Results:   substituteTypeParamsInSlice(method.Results, gt.TypeParams, typeArgs, visitor),
+			Params:    substituteTypeParamsInSlice(method.Params, gt.TypeParams, resolvedTypeArgs, visitor),
+			Results:   substituteTypeParamsInSlice(method.Results, gt.TypeParams, resolvedTypeArgs, visitor),
 			IsPointer: method.IsPointer,
 		}
 		instantiated.Methods[name] = instantiatedMethod

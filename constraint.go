@@ -19,52 +19,48 @@ package generic
 //	(constraint.Types ≠ ∅ ⇒ ∃type ∈ constraint.Types. TypesEqual(t, type))
 func checkConstraint(t Type, constraint TypeConstraint) bool {
 	// handle built-in constraints (e.g., "any", "comparable", etc.)
-    if constraint.BuiltinConstraint != "" {
-        return checkBuiltinConstraint(t, constraint.BuiltinConstraint)
-    }
+	if constraint.BuiltinConstraint != "" {
+		return checkBuiltinConstraint(t, constraint.BuiltinConstraint)
+	}
 
 	// pointer type is a special case, we need to check the base type
-    if ptr, ok := t.(*PointerType); ok {
-        for _, allowedType := range constraint.Types {
-            if ptrAllowed, ok := allowedType.(*PointerType); ok {
-                if TypesEqual(ptr.Base, ptrAllowed.Base) {
-                    return true
-                }
-            }
-        }
-        return checkConstraint(ptr.Base, constraint)
-    }
+	if ptr, ok := t.(*PointerType); ok {
+		for _, allowedType := range constraint.Types {
+			if ptrAllowed, ok := allowedType.(*PointerType); ok {
+				if TypesEqual(ptr.Base, ptrAllowed.Base) {
+					return true
+				}
+			}
+		}
+		return checkConstraint(ptr.Base, constraint)
+	}
 
 	// check if the type implements all the interfaces in the constraint
-    for _, iface := range constraint.Interfaces {
-        if !implInterface(t, iface) {
-            return false
-        }
-    }
+	for _, iface := range constraint.Interfaces {
+		if !implInterface(t, iface) {
+			return false
+		}
+	}
 
 	// check if the type satisfies the type constraints
-    if len(constraint.Types) > 0 {
-        for _, allowedType := range constraint.Types {
-            var matches bool
-            if constraint.IsUnderlying {
-                matches = isUnderlyingType(t, allowedType)
-            } else {
-                matches = TypesEqual(t, allowedType)
-            }
-            if matches {
-                if constraint.Union {
-                    return true
-                }
-            } else if !constraint.Union {
-                return false
-            }
-        }
-        return !constraint.Union
-    }
+	if len(constraint.Types) > 0 {
+		for _, allowedType := range constraint.Types {
+			if constraint.IsUnderlying {
+				if isUnderlyingType(t, allowedType) {
+					return true
+				}
+			} else {
+				if TypesEqual(t, allowedType) {
+					return true
+				}
+			}
+		}
+		return false
+	}
 
 	// in here, we have no constraints or all constraints are satisfied
 	// thus, the type satisfies the constraint
-    return true
+	return true
 }
 
 // implInterface checks if a type t implements the given interface iface.

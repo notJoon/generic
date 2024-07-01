@@ -5,100 +5,100 @@ import (
 )
 
 func TestCheckConstraint(t *testing.T) {
-    tests := []struct {
-        name       string
-        t          Type
-        constraint TypeConstraint
-        want       bool
-    }{
-        {
-            name: "Type satisfies interface constraint",
-            t:    &StructType{Name: "MyStruct", Methods: MethodSet{"String": Method{Name: "String"}}},
-            constraint: TypeConstraint{
-                Interfaces: []Interface{{Name: "Stringer", Methods: MethodSet{"String": Method{Name: "String"}}}},
-            },
-            want: true,
-        },
-        {
-            name: "Type doesn't satisfy interface constraint",
-            t:    &StructType{Name: "MyStruct"},
-            constraint: TypeConstraint{
-                Interfaces: []Interface{{Name: "Stringer", Methods: MethodSet{"String": Method{Name: "String"}}}},
-            },
-            want: false,
-        },
-        {
-            name: "Type satisfies union type constraint",
-            t:    &TypeConstant{Name: "int"},
-            constraint: TypeConstraint{
-                Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "float64"}},
-                Union: true,
-            },
-            want: true,
-        },
-        {
-            name: "Type doesn't satisfy union type constraint",
-            t:    &TypeConstant{Name: "string"},
-            constraint: TypeConstraint{
-                Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "float64"}},
-                Union: true,
-            },
-            want: false,
-        },
-        {
-            name: "Type satisfies non-union type constraint",
-            t:    &TypeConstant{Name: "int"},
-            constraint: TypeConstraint{
-                Types: []Type{&TypeConstant{Name: "int"}},
-                Union: false,
-            },
-            want: true,
-        },
-        {
-            name: "Type doesn't satisfy non-union type constraint",
-            t:    &TypeConstant{Name: "float64"},
-            constraint: TypeConstraint{
-                Types: []Type{&TypeConstant{Name: "int"}},
-                Union: false,
-            },
-            want: false,
-        },
-        {
-            name: "Type satisfies underlying type constraint",
-            t:    &TypeAlias{Name: "MyInt", AliasedTo: &TypeConstant{Name: "int"}},
-            constraint: TypeConstraint{
-                Types:        []Type{&TypeConstant{Name: "int"}},
-                Union:        true,
-                IsUnderlying: true,
-            },
-            want: true,
-        },
-        {
-            name: "Pointer type satisfies constraint",
-            t:    &PointerType{Base: &TypeConstant{Name: "int"}},
-            constraint: TypeConstraint{
-                Types: []Type{&PointerType{Base: &TypeConstant{Name: "int"}}},
-                Union: true,
-            },
-            want: true,
-        },
-        {
-            name: "Type satisfies built-in constraint",
-            t:    &TypeConstant{Name: "int"},
-            constraint: TypeConstraint{
-                BuiltinConstraint: "comparable",
-            },
-            want: true,
-        },
-    }
+	tests := []struct {
+		name       string
+		t          Type
+		constraint TypeConstraint
+		want       bool
+	}{
+		{
+			name: "Type satisfies interface constraint",
+			t:    &StructType{Name: "MyStruct", Methods: MethodSet{"String": Method{Name: "String"}}},
+			constraint: TypeConstraint{
+				Interfaces: []Interface{{Name: "Stringer", Methods: MethodSet{"String": Method{Name: "String"}}}},
+			},
+			want: true,
+		},
+		{
+			name: "Type doesn't satisfy interface constraint",
+			t:    &StructType{Name: "MyStruct"},
+			constraint: TypeConstraint{
+				Interfaces: []Interface{{Name: "Stringer", Methods: MethodSet{"String": Method{Name: "String"}}}},
+			},
+			want: false,
+		},
+		{
+			name: "Type satisfies union type constraint",
+			t:    &TypeConstant{Name: "int"},
+			constraint: TypeConstraint{
+				Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "float64"}},
+				Union: true,
+			},
+			want: true,
+		},
+		{
+			name: "Type doesn't satisfy union type constraint",
+			t:    &TypeConstant{Name: "string"},
+			constraint: TypeConstraint{
+				Types: []Type{&TypeConstant{Name: "int"}, &TypeConstant{Name: "float64"}},
+				Union: true,
+			},
+			want: false,
+		},
+		{
+			name: "Type satisfies non-union type constraint",
+			t:    &TypeConstant{Name: "int"},
+			constraint: TypeConstraint{
+				Types: []Type{&TypeConstant{Name: "int"}},
+				Union: false,
+			},
+			want: true,
+		},
+		{
+			name: "Type doesn't satisfy non-union type constraint",
+			t:    &TypeConstant{Name: "float64"},
+			constraint: TypeConstraint{
+				Types: []Type{&TypeConstant{Name: "int"}},
+				Union: false,
+			},
+			want: false,
+		},
+		{
+			name: "Type satisfies underlying type constraint",
+			t:    &TypeAlias{Name: "MyInt", AliasedTo: &TypeConstant{Name: "int"}},
+			constraint: TypeConstraint{
+				Types:        []Type{&TypeConstant{Name: "int"}},
+				Union:        true,
+				IsUnderlying: true,
+			},
+			want: true,
+		},
+		{
+			name: "Pointer type satisfies constraint",
+			t:    &PointerType{Base: &TypeConstant{Name: "int"}},
+			constraint: TypeConstraint{
+				Types: []Type{&PointerType{Base: &TypeConstant{Name: "int"}}},
+				Union: true,
+			},
+			want: true,
+		},
+		{
+			name: "Type satisfies built-in constraint",
+			t:    &TypeConstant{Name: "int"},
+			constraint: TypeConstraint{
+				BuiltinConstraint: "comparable",
+			},
+			want: true,
+		},
+	}
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            if got := checkConstraint(tt.t, tt.constraint); got != tt.want {
-                t.Errorf("checkConstraint() = %v, want %v", got, tt.want)
-            }
-        })
-    }
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := checkConstraint(tt.t, tt.constraint); got != tt.want {
+				t.Errorf("checkConstraint(%v, %v) = %v, want %v", tt.t, tt.constraint, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestImplInterface(t *testing.T) {

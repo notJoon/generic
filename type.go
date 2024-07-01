@@ -220,6 +220,7 @@ type GenericType struct {
 	TypeParams  []Type
 	Constraints map[string]TypeConstraint
 	Fields      map[string]Type
+	Methods     MethodSet
 }
 
 func (gt *GenericType) String() string {

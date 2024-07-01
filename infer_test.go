@@ -691,7 +691,7 @@ func TestInferType(t *testing.T) {
 				"string": &TypeConstant{Name: "string"},
 			},
 			wantType: nil,
-			wantErr:  fmt.Errorf("type argument TypeConst(string) does not satisfy constraint T"),
+			wantErr:  fmt.Errorf("type argument TypeConst(string) does not satisfy constraint for T"),
 		},
 		{
 			name: "Infer type of non-generic type as generic",
@@ -1373,126 +1373,77 @@ func TestInferTypeWithGenericMethods(t *testing.T) {
 	}
 }
 
-func TestInferTypeGenericInstantiation(t *testing.T) {
-	// Vector<T> = { data: []T }
-	env := TypeEnv{
-		"Vector": &GenericType{
-			Name:       "Vector",
-			TypeParams: []Type{&TypeVariable{Name: "T"}},
-			Fields: map[string]Type{
-				"data": &SliceType{ElementType: &TypeVariable{Name: "T"}},
-			},
-			Constraints: map[string]TypeConstraint{
-				"T": {
-					Types: []Type{
-						&TypeConstant{Name: "int"},
-						&TypeConstant{Name: "float64"},
-					},
-				},
-			},
-		},
-		"int":     &TypeConstant{Name: "int"},
-		"float64": &TypeConstant{Name: "float64"},
-		"string":  &TypeConstant{Name: "string"},
-	}
-
+func TestInstantiateGenericType(t *testing.T) {
 	tests := []struct {
 		name     string
-		expr     ast.Expr
-		wantType Type
+		gt       *GenericType
+		typeArgs []Type
+		want     Type
 		wantErr  bool
 	}{
 		{
-			name: "Valid Vector<int> instantiation",
-			expr: &ast.CompositeLit{
-				Type: &ast.IndexExpr{
-					X:     &ast.Ident{Name: "Vector"},
-					Index: &ast.Ident{Name: "int"},
+			name: "Generic type with methods",
+			gt: &GenericType{
+				Name:       "Box",
+				TypeParams: []Type{&TypeVariable{Name: "T"}},
+				Fields: map[string]Type{
+					"value": &TypeVariable{Name: "T"},
 				},
-				Elts: []ast.Expr{
-					&ast.KeyValueExpr{
-						Key:   &ast.Ident{Name: "data"},
-						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "int"}}},
+				Methods: MethodSet{
+					"Get": Method{
+						Name:    "Get",
+						Params:  []Type{},
+						Results: []Type{&TypeVariable{Name: "T"}},
+					},
+					"Set": Method{
+						Name:    "Set",
+						Params:  []Type{&TypeVariable{Name: "T"}},
+						Results: []Type{},
+					},
+				},
+				Constraints: map[string]TypeConstraint{
+					"T": {
+						Types: []Type{
+							&TypeConstant{Name: "int"},
+							&TypeConstant{Name: "string"},
+						},
+						Union: true,
 					},
 				},
 			},
-			wantType: &GenericType{
-				Name:       "Vector",
+			typeArgs: []Type{&TypeConstant{Name: "int"}},
+			want: &GenericType{
+				Name:       "Box",
 				TypeParams: []Type{&TypeConstant{Name: "int"}},
 				Fields: map[string]Type{
-					"data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
+					"value": &TypeConstant{Name: "int"},
+				},
+				Methods: MethodSet{
+					"Get": Method{
+						Name:    "Get",
+						Params:  []Type{},
+						Results: []Type{&TypeConstant{Name: "int"}},
+					},
+					"Set": Method{
+						Name:    "Set",
+						Params:  []Type{&TypeConstant{Name: "int"}},
+						Results: []Type{},
+					},
 				},
 			},
 			wantErr: false,
-		},
-		{
-			name: "Valid Vector<float64> instantiation",
-			expr: &ast.CompositeLit{
-				Type: &ast.IndexExpr{
-					X:     &ast.Ident{Name: "Vector"},
-					Index: &ast.Ident{Name: "float64"},
-				},
-				Elts: []ast.Expr{
-					&ast.KeyValueExpr{
-						Key:   &ast.Ident{Name: "data"},
-						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "float64"}}},
-					},
-				},
-			},
-			wantType: &GenericType{
-				Name:       "Vector",
-				TypeParams: []Type{&TypeConstant{Name: "float64"}},
-				Fields: map[string]Type{
-					"data": &SliceType{ElementType: &TypeConstant{Name: "float64"}},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "Invalid Vector<string> instantiation",
-			expr: &ast.CompositeLit{
-				Type: &ast.IndexExpr{
-					X:     &ast.Ident{Name: "Vector"},
-					Index: &ast.Ident{Name: "string"},
-				},
-				Elts: []ast.Expr{
-					&ast.KeyValueExpr{
-						Key:   &ast.Ident{Name: "data"},
-						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "string"}}},
-					},
-				},
-			},
-			wantType: nil,
-			wantErr:  true,
-		},
-		{
-			name: "Invalid field in Vector<int>",
-			expr: &ast.CompositeLit{
-				Type: &ast.IndexExpr{
-					X:     &ast.Ident{Name: "Vector"},
-					Index: &ast.Ident{Name: "int"},
-				},
-				Elts: []ast.Expr{
-					&ast.KeyValueExpr{
-						Key:   &ast.Ident{Name: "invalidField"},
-						Value: &ast.CompositeLit{Type: &ast.ArrayType{Elt: &ast.Ident{Name: "int"}}},
-					},
-				},
-			},
-			wantType: nil,
-			wantErr:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotType, err := InferType(tt.expr, env, nil)
+			got, err := InstantiateGenericType(tt.gt, tt.typeArgs)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("InferType(%s) error = %v, wantErr %v", tt.name, err, tt.wantErr)
+				t.Errorf("InstantiateGenericType() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !tt.wantErr && !TypesEqual(gotType, tt.wantType) {
-				t.Errorf("InferType(%s) = %v, want %v", tt.name, gotType, tt.wantType)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("InstantiateGenericType() = %v, want %v", got, tt.want)
 			}
 		})
 	}

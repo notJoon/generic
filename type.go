@@ -173,9 +173,12 @@ func (mt *MapType) String() string {
 }
 
 type TypeConstraint struct {
-	Interfaces []Interface
-	Types      []Type
-	Union      bool // true if this is a union constraint (T1 | T2 | ...)
+	Interfaces        []Interface
+	Types             []Type
+	Union             bool   // true if this is a union constraint (T1 | T2 | ...)
+	IsComparable      bool   // true if the constraint requires comparable types
+	IsUnderlying      bool   // true if constraint is on the underlying type (e.g., ~int)
+	BuiltinConstraint string // for builtin constraints like "any", "comparable", etc.
 }
 
 func (tc *TypeConstraint) String() string {

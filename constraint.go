@@ -244,3 +244,168 @@ func MethodsEqual(m1, m2 Method) bool {
 	}
 	return true
 }
+
+func checkBuiltinConstraint(t Type, constraint string) bool {
+	switch constraint {
+	case "any":
+		return true
+
+	case "comparable":
+		return isComparable(t)
+
+	case "ordered":
+		return isOrdered(t)
+
+	case "complex":
+		return isComplex(t)
+
+	case "float":
+		return isFloat(t)
+
+	case "integer":
+		return isInteger(t)
+
+	case "signed":
+		return isSigned(t)
+
+	case "unsigned":
+		return isUnsigned(t)
+
+	default:
+		return false
+	}
+}
+
+func isComparable(t Type) bool {
+	switch t := t.(type) {
+	case *TypeConstant:
+		// premitive types are comparable
+		return t.Name == "bool" || isNumeric(t) || t.Name == "string"
+	case *PointerType:
+		return true // all pointer types are comparable
+	case *InterfaceType:
+		return true // all interface types are comparable
+	case *StructType:
+		// every field of the struct should be comparable
+		for _, field := range t.Fields {
+			if !isComparable(field) {
+				return false
+			}
+		}
+		return true
+	case *ArrayType:
+		// array is comparable if element type is comparable and length is the same
+		return isComparable(t.ElementType)
+	default:
+		return false
+	}
+}
+
+func isOrdered(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return tc.Name == "int" || tc.Name == "int8" || tc.Name == "int16" ||
+			tc.Name == "int32" || tc.Name == "int64" || tc.Name == "uint" ||
+			tc.Name == "uint8" || tc.Name == "uint16" || tc.Name == "uint32" ||
+			tc.Name == "uint64" || tc.Name == "uintptr" || tc.Name == "float32" ||
+			tc.Name == "float64" || tc.Name == "string"
+	}
+	return false
+}
+
+func isComplex(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return tc.Name == "complex64" || tc.Name == "complex128"
+	}
+	return false
+}
+
+func isFloat(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return tc.Name == "float32" || tc.Name == "float64"
+	}
+	return false
+}
+
+func isInteger(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return tc.Name == "int" || tc.Name == "int8" || tc.Name == "int16" ||
+			tc.Name == "int32" || tc.Name == "int64" || tc.Name == "uint" ||
+			tc.Name == "uint8" || tc.Name == "uint16" || tc.Name == "uint32" ||
+			tc.Name == "uint64" || tc.Name == "uintptr"
+	}
+	return false
+}
+
+func isSigned(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return tc.Name == "int" || tc.Name == "int8" || tc.Name == "int16" ||
+			tc.Name == "int32" || tc.Name == "int64"
+	}
+	return false
+}
+
+func isUnsigned(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return tc.Name == "uint" || tc.Name == "uint8" || tc.Name == "uint16" ||
+			tc.Name == "uint32" || tc.Name == "uint64" || tc.Name == "uintptr"
+	}
+	return false
+}
+
+func isNumeric(t Type) bool {
+	return isInteger(t) || isFloat(t) || isComplex(t)
+}
+
+func isUnderlyingType(t Type, underlyingType Type) bool {
+	for {
+		if alias, ok := t.(*TypeAlias); ok {
+			t = alias.AliasedTo
+		} else {
+			break
+		}
+	}
+
+	switch concrete := t.(type) {
+	case *TypeConstant:
+		underlyingConst, ok := underlyingType.(*TypeConstant)
+		return ok && concrete.Name == underlyingConst.Name
+
+	case *SliceType:
+		underlyingSlice, ok := underlyingType.(*SliceType)
+		return ok && isUnderlyingType(concrete.ElementType, underlyingSlice.ElementType)
+
+	case *MapType:
+		underlyingMap, ok := underlyingType.(*MapType)
+		return ok &&
+			isUnderlyingType(concrete.KeyType, underlyingMap.KeyType) &&
+			isUnderlyingType(concrete.ValueType, underlyingMap.ValueType)
+
+	case *StructType:
+		underlyingStruct, ok := underlyingType.(*StructType)
+		if !ok || len(concrete.Fields) != len(underlyingStruct.Fields) {
+			return false
+		}
+		for name, field := range concrete.Fields {
+			underlyingField, ok := underlyingStruct.Fields[name]
+			if !ok || !isUnderlyingType(field, underlyingField) {
+				return false
+			}
+		}
+		return true
+
+	case *FunctionType:
+		underlyingFunc, ok := underlyingType.(*FunctionType)
+		if !ok || len(concrete.ParamTypes) != len(underlyingFunc.ParamTypes) {
+			return false
+		}
+		for i, param := range concrete.ParamTypes {
+			if !isUnderlyingType(param, underlyingFunc.ParamTypes[i]) {
+				return false
+			}
+		}
+		return isUnderlyingType(concrete.ReturnType, underlyingFunc.ReturnType)
+
+	default:
+		return false
+	}
+}

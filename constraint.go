@@ -18,9 +18,13 @@ package generic
 //	(∀i ∈ constraint.Interfaces. implementsInterface(t, i)) ∧
 //	(constraint.Types ≠ ∅ ⇒ ∃type ∈ constraint.Types. TypesEqual(t, type))
 func checkConstraint(t Type, constraint TypeConstraint) bool {
+	// handle built-in constraints (e.g., "any", "comparable", etc.)
+	if constraint.BuiltinConstraint != "" {
+		return checkBuiltinConstraint(t, constraint.BuiltinConstraint)
+	}
+
+	// pointer type is a special case, we need to check the base type
 	if ptr, ok := t.(*PointerType); ok {
-		// if pointer type, check constraints against base type
-		// return checkConstraint(ptr.Base, constraint)
 		for _, allowedType := range constraint.Types {
 			if ptrAllowed, ok := allowedType.(*PointerType); ok {
 				if TypesEqual(ptr.Base, ptrAllowed.Base) {
@@ -30,32 +34,32 @@ func checkConstraint(t Type, constraint TypeConstraint) bool {
 		}
 		return checkConstraint(ptr.Base, constraint)
 	}
+
+	// check if the type implements all the interfaces in the constraint
 	for _, iface := range constraint.Interfaces {
 		if !implInterface(t, iface) {
 			return false
 		}
 	}
+
+	// check if the type satisfies the type constraints
 	if len(constraint.Types) > 0 {
-		if constraint.Union {
-			// if union constraint, check if any of the types match
-			for _, allowedType := range constraint.Types {
+		for _, allowedType := range constraint.Types {
+			if constraint.IsUnderlying {
+				if isUnderlyingType(t, allowedType) {
+					return true
+				}
+			} else {
 				if TypesEqual(t, allowedType) {
 					return true
 				}
 			}
-			return false
-		} else {
-			// Non-Union => all types must match
-			for _, allowedType := range constraint.Types {
-				if TypesEqual(t, allowedType) {
-					return true
-				}
-			}
-			return false
 		}
+		return false
 	}
-	// only interfaces are specified, and all are satisfied or
-	// no constraints are specified
+
+	// in here, we have no constraints or all constraints are satisfied
+	// thus, the type satisfies the constraint
 	return true
 }
 
@@ -85,9 +89,9 @@ func implInterface(t Type, iface Interface) bool {
 func checkPrimitiveTypeInterface(tName string, iface Interface) bool {
 	// define an interface to implement for each primitive type
 	primitiveInterfaces := map[string][]string{
-		"int":     {"Stringer", "Printable", "Comparable"},
-		"string":  {"Printable", "Comparable"},
-		"float64": {"Stringer", "Printable", "Comparable"},
+		TypeInt:     {"Stringer", "Printable", "Comparable"},
+		TypeString:  {"Printable", "Comparable"},
+		TypeFloat64: {"Stringer", "Printable", "Comparable"},
 	}
 
 	if interfaces, ok := primitiveInterfaces[tName]; ok {
@@ -243,4 +247,184 @@ func MethodsEqual(m1, m2 Method) bool {
 		}
 	}
 	return true
+}
+
+// checkBuiltinConstraint checks if a the given type satisfies the specified built-in constraint.
+func checkBuiltinConstraint(t Type, constraint string) bool {
+	switch constraint {
+	case ConstraintAny:
+		return true
+	case ConstraintComparable:
+		return isComparable(t)
+	case ConstraintOrdered:
+		return isOrdered(t)
+	case ConstraintComplex:
+		return isComplex(t)
+	case ConstraintFloat:
+		return isFloat(t)
+	case ConstraintInteger:
+		return isInteger(t)
+	case ConstraintSigned:
+		return isSigned(t)
+	case ConstraintUnsigned:
+		return isUnsigned(t)
+	default:
+		return false
+	}
+}
+
+// isComparable determines if the given type is comparable.
+func isComparable(t Type) bool {
+	switch t := t.(type) {
+	case *TypeConstant:
+		// premitive types are comparable
+		return t.Name == TypeBool || isNumeric(t) || t.Name == TypeString
+	case *PointerType:
+		return true // all pointer types are comparable
+	case *InterfaceType:
+		return true // all interface types are comparable
+	case *StructType:
+		// every field of the struct should be comparable
+		for _, field := range t.Fields {
+			if !isComparable(field) {
+				return false
+			}
+		}
+		return true
+	case *ArrayType:
+		// array is comparable if element type is comparable and length is the same
+		return isComparable(t.ElementType)
+	default:
+		return false
+	}
+}
+
+var (
+	signedIntegers = map[string]bool{
+		TypeInt: true, TypeInt8: true, TypeInt16: true, TypeInt32: true, TypeInt64: true,
+	}
+	unsignedIntegers = map[string]bool{
+		TypeUint: true, TypeUint8: true, TypeUint16: true, TypeUint32: true, TypeUint64: true, TypeUintptr: true,
+	}
+	floats = map[string]bool{
+		TypeFloat32: true, TypeFloat64: true,
+	}
+	complexes = map[string]bool{
+		TypeComplex64: true, TypeComplex128: true,
+	}
+	orderedTypes = map[string]bool{
+		TypeString: true,
+	}
+)
+
+// isOrdered checks if the given type is ordered (can be used with comparison operators)
+// (e.g., <, <=, >, >=)
+func isOrdered(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return signedIntegers[tc.Name] ||
+			unsignedIntegers[tc.Name] ||
+			floats[tc.Name] ||
+			orderedTypes[tc.Name]
+	}
+	return false
+}
+
+// isComplex checks if the given type is a complex number type.
+func isComplex(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return complexes[tc.Name]
+	}
+	return false
+}
+
+// isFloat checks if the given type is a floating-point number type.
+func isFloat(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return floats[tc.Name]
+	}
+	return false
+}
+
+// isInteger checks if the given type is an integer type.
+func isInteger(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return signedIntegers[tc.Name] || unsignedIntegers[tc.Name]
+	}
+	return false
+}
+
+// isSigned checks if the given type is a signed integer type.
+func isSigned(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return signedIntegers[tc.Name]
+	}
+	return false
+}
+
+// isUnsigned checks if the given type is an unsigned integer type.
+func isUnsigned(t Type) bool {
+	if tc, ok := t.(*TypeConstant); ok {
+		return unsignedIntegers[tc.Name]
+	}
+	return false
+}
+
+// isNumeric checks if the given type is a numeric type.
+func isNumeric(t Type) bool {
+	return isInteger(t) || isFloat(t) || isComplex(t)
+}
+
+// isUnderlyingType checks if the given type has the specified underlying type.
+func isUnderlyingType(t Type, underlyingType Type) bool {
+	for {
+		if alias, ok := t.(*TypeAlias); ok {
+			t = alias.AliasedTo
+		} else {
+			break
+		}
+	}
+
+	switch concrete := t.(type) {
+	case *TypeConstant:
+		underlyingConst, ok := underlyingType.(*TypeConstant)
+		return ok && concrete.Name == underlyingConst.Name
+
+	case *SliceType:
+		underlyingSlice, ok := underlyingType.(*SliceType)
+		return ok && isUnderlyingType(concrete.ElementType, underlyingSlice.ElementType)
+
+	case *MapType:
+		underlyingMap, ok := underlyingType.(*MapType)
+		return ok &&
+			isUnderlyingType(concrete.KeyType, underlyingMap.KeyType) &&
+			isUnderlyingType(concrete.ValueType, underlyingMap.ValueType)
+
+	case *StructType:
+		underlyingStruct, ok := underlyingType.(*StructType)
+		if !ok || len(concrete.Fields) != len(underlyingStruct.Fields) {
+			return false
+		}
+		for name, field := range concrete.Fields {
+			underlyingField, ok := underlyingStruct.Fields[name]
+			if !ok || !isUnderlyingType(field, underlyingField) {
+				return false
+			}
+		}
+		return true
+
+	case *FunctionType:
+		underlyingFunc, ok := underlyingType.(*FunctionType)
+		if !ok || len(concrete.ParamTypes) != len(underlyingFunc.ParamTypes) {
+			return false
+		}
+		for i, param := range concrete.ParamTypes {
+			if !isUnderlyingType(param, underlyingFunc.ParamTypes[i]) {
+				return false
+			}
+		}
+		return isUnderlyingType(concrete.ReturnType, underlyingFunc.ReturnType)
+
+	default:
+		return false
+	}
 }

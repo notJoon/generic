@@ -5,6 +5,37 @@ import (
 	"strings"
 )
 
+const (
+	// Type constraints
+	ConstraintAny        = "any"
+	ConstraintComparable = "comparable"
+	ConstraintOrdered    = "ordered"
+	ConstraintComplex    = "complex"
+	ConstraintFloat      = "float"
+	ConstraintInteger    = "integer"
+	ConstraintSigned     = "signed"
+	ConstraintUnsigned   = "unsigned"
+
+	// Type names
+	TypeBool       = "bool"
+	TypeString     = "string"
+	TypeInt        = "int"
+	TypeInt8       = "int8"
+	TypeInt16      = "int16"
+	TypeInt32      = "int32"
+	TypeInt64      = "int64"
+	TypeUint       = "uint"
+	TypeUint8      = "uint8"
+	TypeUint16     = "uint16"
+	TypeUint32     = "uint32"
+	TypeUint64     = "uint64"
+	TypeUintptr    = "uintptr"
+	TypeFloat32    = "float32"
+	TypeFloat64    = "float64"
+	TypeComplex64  = "complex64"
+	TypeComplex128 = "complex128"
+)
+
 // TODO: print type more go-like
 
 // Type represents any type in the type system.
@@ -173,9 +204,12 @@ func (mt *MapType) String() string {
 }
 
 type TypeConstraint struct {
-	Interfaces []Interface
-	Types      []Type
-	Union      bool // true if this is a union constraint (T1 | T2 | ...)
+	Interfaces        []Interface
+	Types             []Type
+	Union             bool   // true if this is a union constraint (T1 | T2 | ...)
+	IsComparable      bool   // true if the constraint requires comparable types
+	IsUnderlying      bool   // true if constraint is on the underlying type (e.g., ~int)
+	BuiltinConstraint string // for builtin constraints like "any", "comparable", etc.
 }
 
 func (tc *TypeConstraint) String() string {
@@ -217,6 +251,7 @@ type GenericType struct {
 	TypeParams  []Type
 	Constraints map[string]TypeConstraint
 	Fields      map[string]Type
+	Methods     MethodSet
 }
 
 func (gt *GenericType) String() string {

@@ -912,6 +912,10 @@ func TestInferTypeWithNestedGenericTypes(t *testing.T) {
 				&TypeVariable{Name: "K"},
 				&TypeVariable{Name: "V"},
 			},
+			Constraints: map[string]TypeConstraint{
+				"K": {BuiltinConstraint: "comparable"},
+				"V": {BuiltinConstraint: "any"},
+			},
 			Fields: map[string]Type{
 				"data": &MapType{
 					KeyType:   &TypeVariable{Name: "K"},
@@ -962,6 +966,10 @@ func TestInferTypeWithNestedGenericTypes(t *testing.T) {
 					"data": &SliceType{ElementType: &TypeConstant{Name: "int"}},
 				},
 			},
+		},
+		Constraints: map[string]TypeConstraint{
+			"K": {BuiltinConstraint: "comparable"},
+			"V": {BuiltinConstraint: "any"},
 		},
 		Fields: map[string]Type{
 			"data": &MapType{

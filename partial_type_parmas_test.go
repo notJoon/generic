@@ -107,6 +107,15 @@ func TestPartialTypeParameterInference(t *testing.T) {
 					t.Errorf("Type parameter %d: expected %v, got %v", i, tt.expectedParams[i], param)
 				}
 			}
+
+			// Check if constraints are satisfied
+			originalGeneric := env["MyFunc"].(*GenericType)
+			for i, param := range genericType.TypeParams {
+				constraint := originalGeneric.Constraints[originalGeneric.TypeParams[i].(*TypeVariable).Name]
+				if !checkConstraint(param, constraint) {
+					t.Errorf("Type parameter %d (%v) does not satisfy constraint %v", i, param, constraint)
+				}
+			}
 		})
 	}
 }

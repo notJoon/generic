@@ -202,14 +202,11 @@ func InferType(node interface{}, env TypeEnv, ctx *InferenceContext) (Type, erro
 		if !ok {
 			return nil, ErrNotAGenericType
 		}
-		if len(expr.Indices) != len(genericType.TypeParams) {
-			return nil, fmt.Errorf("expected %d type parameters, got %d", len(genericType.TypeParams), len(expr.Indices))
+		inferredParams, err := inferPartialTypeParams(genericType, expr.Indices, env, ctx)
+		if err != nil {
+			return nil, err
 		}
-		typeArgs := make([]interface{}, len(expr.Indices))
-		for i, idx := range expr.Indices {
-			typeArgs[i] = idx
-		}
-		return InstantiateGenericType(genericType, typeArgs, env, ctx)
+		return InstantiateGenericType(genericType, inferredParams, env, ctx)
 	case *ast.CompositeLit:
 		switch typeExpr := expr.Type.(type) {
 		case *ast.MapType:
@@ -962,7 +959,7 @@ func InstantiateGenericType(gt *GenericType, typeArgs []interface{}, env TypeEnv
 				return nil, fmt.Errorf("type argument %v does not satisfy constraint for %s", argType, gt.TypeParams[i].(*TypeVariable).Name)
 			}
 		}
-
+		// keep going even if there is no constraint
 		resolvedTypeArgs[i] = argType
 	}
 

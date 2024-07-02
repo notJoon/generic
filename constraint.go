@@ -18,6 +18,9 @@ package generic
 //	(∀i ∈ constraint.Interfaces. implementsInterface(t, i)) ∧
 //	(constraint.Types ≠ ∅ ⇒ ∃type ∈ constraint.Types. TypesEqual(t, type))
 func checkConstraint(t Type, constraint TypeConstraint) bool {
+	if _, ok := t.(*TypeVariable); ok {
+		return true
+	}
 	// handle built-in constraints (e.g., "any", "comparable", etc.)
 	if constraint.BuiltinConstraint != "" {
 		return checkBuiltinConstraint(t, constraint.BuiltinConstraint)

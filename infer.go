@@ -202,13 +202,6 @@ func InferType(node interface{}, env TypeEnv, ctx *InferenceContext) (Type, erro
 		if !ok {
 			return nil, ErrNotAGenericType
 		}
-		// if len(expr.Indices) != len(genericType.TypeParams) {
-		// 	return nil, fmt.Errorf("expected %d type parameters, got %d", len(genericType.TypeParams), len(expr.Indices))
-		// }
-		// typeArgs := make([]interface{}, len(expr.Indices))
-		// for i, idx := range expr.Indices {
-		// 	typeArgs[i] = idx
-		// }
 		inferredParams, err := inferPartialTypeParams(genericType, expr.Indices, env, ctx)
 		if err != nil {
 			return nil, err

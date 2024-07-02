@@ -78,12 +78,8 @@ func implInterface(t Type, iface Interface) bool {
 	case *FunctionType:
 		// function type can't implement an interface
 		return false
-	case *InterfaceType:
-		// check if the interface contains all methods of the type
-		return interfaceContainsAll(concreteType, iface)
-	case *StructType:
-		// check each method of the interface is implemented by the struct
-		return structImplsInterface(concreteType, iface)
+	case MethodHolder:
+		return typeContainsAllMethods(concreteType, iface)
 	default:
 		return false
 	}
@@ -107,18 +103,9 @@ func checkPrimitiveTypeInterface(tName string, iface Interface) bool {
 	return false
 }
 
-func interfaceContainsAll(t *InterfaceType, iface Interface) bool {
+func typeContainsAllMethods(t MethodHolder, iface Interface) bool {
 	for name := range iface.Methods {
-		if _, ok := t.Methods[name]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func structImplsInterface(t *StructType, iface Interface) bool {
-	for name := range iface.Methods {
-		if _, ok := t.Methods[name]; !ok {
+		if _, ok := t.GetMethods()[name]; !ok {
 			return false
 		}
 	}

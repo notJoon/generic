@@ -311,3 +311,16 @@ func (ta *TypeAlias) String() string {
 // It acts as a symbol table for type inference, mapping type variable names
 // to their inferred or declared types.
 type TypeEnv map[string]Type
+
+// MethodHolder is an interface for types that have mthods
+type MethodHolder interface {
+	GetMethods() MethodSet
+}
+
+func (t *InterfaceType) GetMethods() MethodSet {
+	return t.Methods
+}
+
+func (t *StructType) GetMethods() MethodSet {
+	return t.Methods
+}

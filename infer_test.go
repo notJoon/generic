@@ -129,6 +129,10 @@ func TestInferType(t *testing.T) {
 				"Map": &GenericType{
 					Name:       "Map",
 					TypeParams: []Type{&TypeVariable{Name: "K"}, &TypeVariable{Name: "V"}},
+					Constraints: map[string]TypeConstraint{
+						"K": {BuiltinConstraint: "comparable"},
+						"V": {BuiltinConstraint: "any"},
+					},
 				},
 				"string": &TypeConstant{Name: "string"},
 				"int":    &TypeConstant{Name: "int"},
@@ -136,6 +140,10 @@ func TestInferType(t *testing.T) {
 			wantType: &GenericType{
 				Name:       "Map",
 				TypeParams: []Type{&TypeConstant{Name: "string"}, &TypeConstant{Name: "int"}},
+				Constraints: map[string]TypeConstraint{
+					"K": {BuiltinConstraint: "comparable"},
+					"V": {BuiltinConstraint: "any"},
+				},
 			},
 			wantErr: nil,
 		},
@@ -159,7 +167,7 @@ func TestInferType(t *testing.T) {
 				"bool":   &TypeConstant{Name: "bool"},
 			},
 			wantType: nil,
-			wantErr:  fmt.Errorf("expected 2 type parameters, got 3"),
+			wantErr:  fmt.Errorf("no constraint for type parameter T1"),
 		},
 		{
 			name: "Infer type of nested generic type",
@@ -177,10 +185,17 @@ func TestInferType(t *testing.T) {
 				"Outer": &GenericType{
 					Name:       "Outer",
 					TypeParams: []Type{&TypeVariable{Name: "T"}, &TypeVariable{Name: "U"}},
+					Constraints: map[string]TypeConstraint{
+						"T": {BuiltinConstraint: "any"},
+						"U": {BuiltinConstraint: "any"},
+					},
 				},
 				"Inner": &GenericType{
 					Name:       "Inner",
 					TypeParams: []Type{&TypeVariable{Name: "V"}},
+					Constraints: map[string]TypeConstraint{
+						"V": {BuiltinConstraint: "any"},
+					},
 				},
 				"int":    &TypeConstant{Name: "int"},
 				"string": &TypeConstant{Name: "string"},
@@ -192,7 +207,14 @@ func TestInferType(t *testing.T) {
 					&GenericType{
 						Name:       "Inner",
 						TypeParams: []Type{&TypeConstant{Name: "string"}},
+						Constraints: map[string]TypeConstraint{
+							"V": {BuiltinConstraint: "any"},
+						},
 					},
+				},
+				Constraints: map[string]TypeConstraint{
+					"T": {BuiltinConstraint: "any"},
+					"U": {BuiltinConstraint: "any"},
 				},
 			},
 			wantErr: nil,
@@ -834,6 +856,10 @@ func TestInferTypeWithMultipleTypeParams(t *testing.T) {
 				&TypeVariable{Name: "T"},
 				&TypeVariable{Name: "U"},
 			},
+			Constraints: map[string]TypeConstraint{
+				"T": {BuiltinConstraint: "any"},
+				"U": {BuiltinConstraint: "any"},
+			},
 			Fields: map[string]Type{
 				"First":  &TypeVariable{Name: "T"},
 				"Second": &TypeVariable{Name: "U"},
@@ -861,6 +887,10 @@ func TestInferTypeWithMultipleTypeParams(t *testing.T) {
 		TypeParams: []Type{
 			&TypeConstant{Name: "int"},
 			&TypeConstant{Name: "string"},
+		},
+		Constraints: map[string]TypeConstraint{
+			"T": {BuiltinConstraint: "any"},
+			"U": {BuiltinConstraint: "any"},
 		},
 		Fields: map[string]Type{
 			"First":  &TypeConstant{Name: "int"},
